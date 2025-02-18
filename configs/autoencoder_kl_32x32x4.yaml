@@ -19,7 +19,6 @@ model:
       num_res_blocks: 2
       attn_resolutions: []
       dropout: 0.0
-        
 
     lossconfig:
       target: sgm.modules.autoencoding.losses.GeneralLPIPSWithDiscriminator
@@ -57,12 +56,12 @@ lightning:
 
   modelcheckpoint:
     params:
-      every_n_train_steps: 50
+      every_n_epochs: 1
 
   callbacks:
     metrics_over_trainsteps_checkpoint:
       params:
-        every_n_train_steps: 50
+        every_n_train_steps: 50000
 
     image_logger:
       target: main.ImageLogger
