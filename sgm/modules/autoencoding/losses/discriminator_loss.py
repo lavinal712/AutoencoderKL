@@ -24,6 +24,7 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
         disc_factor: float = 1.0,
         disc_weight: float = 1.0,
         perceptual_weight: float = 1.0,
+        reconstruction_loss: str = "l1",
         disc_loss: str = "hinge",
         scale_input_to_tgt_size: bool = False,
         dims: int = 2,
@@ -41,6 +42,7 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
                 f"independently."
             )
         self.scale_input_to_tgt_size = scale_input_to_tgt_size
+        assert reconstruction_loss in ["l1", "l2"]
         assert disc_loss in ["hinge", "vanilla"]
         self.perceptual_loss = LPIPS().eval()
         self.perceptual_weight = perceptual_weight
@@ -49,6 +51,7 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
             torch.full((), logvar_init), requires_grad=learn_logvar
         )
         self.learn_logvar = learn_logvar
+        self.reconstruction_loss = reconstruction_loss
 
         discriminator_config = default(
             discriminator_config,
@@ -227,7 +230,10 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
                 (inputs, reconstructions),
             )
 
-        rec_loss = torch.abs(inputs.contiguous() - reconstructions.contiguous())
+        if self.reconstruction_loss == "l1":
+            rec_loss = torch.abs(inputs.contiguous() - reconstructions.contiguous())
+        else:
+            rec_loss = nn.functional.mse_loss(inputs.contiguous(), reconstructions.contiguous(), reduction="none")
         if self.perceptual_weight > 0:
             p_loss = self.perceptual_loss(
                 inputs.contiguous(), reconstructions.contiguous()
