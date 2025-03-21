@@ -1,5 +1,5 @@
 model:
-  base_learning_rate: 1.5e-7
+  base_learning_rate: 1.0e-5
   target: sgm.models.autoencoder.AutoencoderKL
   params:
     input_key: jpg
@@ -8,7 +8,7 @@ model:
     embed_dim: 4
     ckpt_path: checkpoints/vae-ft-mse-840000-ema-pruned.ckpt
     trainable_ae_params:
-      - ["decoder", "quant_conv"]
+      - ["decoder", "post_quant_conv"]
 
     ddconfig:
       attn_type: vanilla-xformers

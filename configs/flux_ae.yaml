@@ -1,5 +1,5 @@
 model:
-  base_learning_rate: 4.5e-6
+  base_learning_rate: 5.0e-6
   target: sgm.models.autoencoder.AutoencodingEngine
   params:
     input_key: jpg
