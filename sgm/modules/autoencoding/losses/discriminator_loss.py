@@ -29,6 +29,7 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
         scale_input_to_tgt_size: bool = False,
         dims: int = 2,
         learn_logvar: bool = False,
+        use_mean: bool = False,
         regularization_weights: Union[None, Dict[str, float]] = None,
         additional_log_keys: Optional[List[str]] = None,
         discriminator_config: Optional[Dict] = None,
@@ -44,6 +45,7 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
         self.scale_input_to_tgt_size = scale_input_to_tgt_size
         assert pixel_loss in ["l1", "l2"]
         assert disc_loss in ["hinge", "vanilla"]
+        self.pixel_loss = lambda x, y: torch.abs(x - y) if pixel_loss == "l1" else torch.pow(x - y, 2)
         self.perceptual_loss = LPIPS().eval()
         self.perceptual_weight = perceptual_weight
         # output log variance
@@ -51,7 +53,7 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
             torch.full((), logvar_init), requires_grad=learn_logvar
         )
         self.learn_logvar = learn_logvar
-        self.pixel_loss = lambda x, y: torch.abs(x - y) if pixel_loss == "l1" else torch.pow(x - y, 2)
+        self.use_mean = use_mean
 
         discriminator_config = default(
             discriminator_config,
@@ -237,7 +239,7 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
             )
             rec_loss = rec_loss + self.perceptual_weight * p_loss
 
-        nll_loss, weighted_nll_loss = self.get_nll_loss(rec_loss, weights)
+        nll_loss, weighted_nll_loss = self.get_nll_loss(rec_loss, weights, self.use_mean)
 
         # now the GAN part
         if optimizer_idx == 0:
@@ -298,12 +300,17 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
         self,
         rec_loss: torch.Tensor,
         weights: Optional[Union[float, torch.Tensor]] = None,
+        use_mean: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         nll_loss = rec_loss / torch.exp(self.logvar) + self.logvar
         weighted_nll_loss = nll_loss
         if weights is not None:
             weighted_nll_loss = weights * nll_loss
-        weighted_nll_loss = torch.sum(weighted_nll_loss) / weighted_nll_loss.shape[0]
-        nll_loss = torch.sum(nll_loss) / nll_loss.shape[0]
+        if not use_mean:
+            weighted_nll_loss = torch.sum(weighted_nll_loss) / weighted_nll_loss.shape[0]
+            nll_loss = torch.sum(nll_loss) / nll_loss.shape[0]
+        else:
+            weighted_nll_loss = torch.mean(weighted_nll_loss)
+            nll_loss = torch.mean(nll_loss)
 
         return nll_loss, weighted_nll_loss

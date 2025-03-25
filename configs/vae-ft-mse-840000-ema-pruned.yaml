@@ -1,10 +1,10 @@
 model:
-  base_learning_rate: 1.0e-5
+  base_learning_rate: 4.5e-6
   target: sgm.models.autoencoder.AutoencoderKL
   params:
     input_key: jpg
     monitor: "val/loss/rec"
-    disc_start_iter: 1000000001
+    disc_start_iter: 50001
     embed_dim: 4
     ckpt_path: checkpoints/vae-ft-mse-840000-ema-pruned.ckpt
     trainable_ae_params:
@@ -27,7 +27,7 @@ model:
       target: sgm.modules.autoencoding.losses.GeneralLPIPSWithDiscriminator
       params:
         perceptual_weight: 0.1
-        disc_start: 1000000001
+        disc_start: 50001
         disc_weight: 0.0
         learn_logvar: false
         pixel_loss: "l2"
