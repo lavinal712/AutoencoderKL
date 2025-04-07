@@ -132,7 +132,7 @@ def get_parser(**parser_kwargs):
     parser.add_argument(
         "--projectname",
         type=str,
-        default="autoencoderkl",
+        default="transfusion_vae",
     )
     parser.add_argument(
         "-l",
