@@ -8,7 +8,7 @@ In paper [Transfusion](https://arxiv.org/abs/2408.11039), the authors proposed a
 \mathcal{L}_{\text{VAE}} = \mathcal{L}_{1} + \mathcal{L}_{\text{LPIPS}} + 0.5 \mathcal{L}_{\text{GAN}} + 0.2 \mathcal{L}_{\text{ID}} + 0.000001 \mathcal{L}_{\text{KL}}
 ```
 
-where $\mathcal{L}_{1}$ is the L1 loss, $\mathcal{L}_{\text{LPIPS}}$ is the perceptual loss based on LPIPS similarity, $\mathcal{L}_{\text{GAN}}$ is a patch-based discriminator loss, $\mathcal{L}_{\text{ID}}$ is a perceptual loss based on Moco v2 model, and $\mathcal{L}_{\text{KL}}$ is the standard KL-regularization loss.
+where $`\mathcal{L}_{1}`$ is the L1 loss, $`\mathcal{L}_{\text{LPIPS}}`$ is the perceptual loss based on LPIPS similarity, $`\mathcal{L}_{\text{GAN}}`$ is a patch-based discriminator loss, $`\mathcal{L}_{\text{ID}}`$ is a perceptual loss based on Moco v2 model, and $`\mathcal{L}_{\text{KL}}`$ is the standard KL-regularization loss.
 
 ## Visualization
 
