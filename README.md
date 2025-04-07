@@ -4,9 +4,9 @@ This repository is a branch of [lavinal712/AutoencoderKL](https://github.com/lav
 
 In paper [Transfusion](https://arxiv.org/abs/2408.11039), the authors proposed a new VAE for image generation. Different from the original VAE, the Transfusion VAE has 8 latent dimensions, and the training loss is:
 
-$$
+```math
 \mathcal{L}_{\text{VAE}} = \mathcal{L}_{1} + \mathcal{L}_{\text{LPIPS}} + 0.5 \mathcal{L}_{\text{GAN}} + 0.2 \mathcal{L}_{\text{ID}} + 0.000001 \mathcal{L}_{\text{KL}}
-$$
+```
 
 where $\mathcal{L}_{1}$ is the L1 loss, $\mathcal{L}_{\text{LPIPS}}$ is the perceptual loss based on LPIPS similarity, $\mathcal{L}_{\text{GAN}}$ is a patch-based discriminator loss, $\mathcal{L}_{\text{ID}}$ is a perceptual loss based on Moco v2 model, and $\mathcal{L}_{\text{KL}}$ is the standard KL-regularization loss.
 
