@@ -1,17 +1,29 @@
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
+import kornia
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torchvision
+import torchvision.models as models
 from einops import rearrange
 from matplotlib import colormaps
 from matplotlib import pyplot as plt
+from omegaconf import DictConfig, OmegaConf
 
 from ....util import default, instantiate_from_config
 from ..lpips.loss.lpips import LPIPS
 from ..lpips.model.model import weights_init
 from ..lpips.vqperceptual import hinge_d_loss, vanilla_d_loss
+from ..moco.model import vits
+from ..moco.util import get_ckpt_path
+
+
+ARCH_MAP = {
+    "mocov3_vits": "vit_small",
+    "mocov3_vitb": "vit_base",
+}
 
 
 class GeneralLPIPSWithDiscriminator(nn.Module):
@@ -24,6 +36,9 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
         disc_factor: float = 1.0,
         disc_weight: float = 1.0,
         perceptual_weight: float = 1.0,
+        perceptual_name: Optional[str] = None,
+        perceptual_config: Optional[Dict] = None,
+        perceptual_weight_2: float = 1.0,
         pixel_loss: str = "l1",
         disc_loss: str = "hinge",
         scale_input_to_tgt_size: bool = False,
@@ -45,14 +60,38 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
         self.scale_input_to_tgt_size = scale_input_to_tgt_size
         assert pixel_loss in ["l1", "l2"]
         assert disc_loss in ["hinge", "vanilla"]
-        self.pixel_loss = lambda x, y: torch.abs(x - y) if pixel_loss == "l1" else torch.pow(x - y, 2)
         self.perceptual_loss = LPIPS().eval()
         self.perceptual_weight = perceptual_weight
+        self.perceptual_name = default(perceptual_name, "mocov2_800ep")
+        perceptual_config = default(
+            perceptual_config,
+            {
+                "target": "sgm.modules.autoencoding.moco.model.moco.MoCo",
+                "params": {
+                    "dim": 128,
+                    "K": 65536,
+                    "m": 0.999,
+                    "T": 0.2,
+                    "mlp": True,
+                },
+            },
+        )
+        arch = perceptual_config["params"].pop("arch", "resnet50")
+        if isinstance(perceptual_config, DictConfig):
+            perceptual_config = OmegaConf.to_container(perceptual_config)
+        if arch == "resnet50":
+            perceptual_config["params"]["base_encoder"] = models.__dict__[arch]
+        else:
+            perceptual_config["params"]["base_encoder"] = vits.__dict__[ARCH_MAP[arch]]
+        self.perceptual_loss_2 = instantiate_from_config(perceptual_config).eval()
+        self.load_perceptual_from_pretrained(self.perceptual_name)
+        self.perceptual_weight_2 = perceptual_weight_2
         # output log variance
         self.logvar = nn.Parameter(
             torch.full((), logvar_init), requires_grad=learn_logvar
         )
         self.learn_logvar = learn_logvar
+        self.pixel_loss = lambda x, y: torch.abs(x - y) if pixel_loss == "l1" else torch.pow(x - y, 2)
         self.use_mean = use_mean
 
         discriminator_config = default(
@@ -86,6 +125,16 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
 
         self.additional_log_keys = set(default(additional_log_keys, []))
         self.additional_log_keys.update(set(self.regularization_weights.keys()))
+
+        self.register_buffer("mean", torch.Tensor([0.485, 0.456, 0.406]), persistent=False)
+        self.register_buffer("std", torch.Tensor([0.229, 0.224, 0.225]), persistent=False)
+
+    def load_perceptual_from_pretrained(self, name="mocov2_800ep"):
+        ckpt = get_ckpt_path(name, "sgm/modules/autoencoding/moco")
+        sd = torch.load(ckpt, map_location=torch.device("cpu"), weights_only=True)["state_dict"]
+        sd = {k.replace("module.", ""): v for k, v in sd.items() if k.startswith("module.")}
+        self.perceptual_loss_2.load_state_dict(sd, strict=False)
+        print("loaded pretrained MoCo loss from {}".format(ckpt))
 
     def get_trainable_parameters(self) -> Iterator[nn.Parameter]:
         return self.discriminator.parameters()
@@ -209,6 +258,18 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
         d_weight = d_weight * self.discriminator_weight
         return d_weight
 
+    def rescale(self, x: torch.Tensor) -> torch.Tensor:
+        x = kornia.geometry.resize(
+            x,
+            (224, 224),
+            interpolation="bicubic",
+            align_corners=True,
+            antialias=True,
+        )
+        x = (x + 1.0) / 2.0
+        x = kornia.enhance.normalize(x, mean=self.mean, std=self.std)
+        return x
+
     def forward(
         self,
         inputs: torch.Tensor,
@@ -238,8 +299,19 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
                 inputs.contiguous(), reconstructions.contiguous()
             )
             rec_loss = rec_loss + self.perceptual_weight * p_loss
+        if self.perceptual_weight_2 > 0:
+            rescale_inputs = self.rescale(inputs)
+            rescale_reconstructions = self.rescale(reconstructions)
+            if "vit" in self.perceptual_name:
+                rescale_inputs_perceptual_features = self.perceptual_loss_2.base_encoder(rescale_inputs)
+                rescale_reconstructions_perceptual_features = self.perceptual_loss_2.base_encoder(rescale_reconstructions)
+            else:
+                rescale_inputs_perceptual_features = self.perceptual_loss_2.encoder_q(rescale_inputs)
+                rescale_reconstructions_perceptual_features = self.perceptual_loss_2.encoder_q(rescale_reconstructions)
+            p_loss_2 = F.mse_loss(rescale_inputs_perceptual_features, rescale_reconstructions_perceptual_features)
+            rec_loss = rec_loss + self.perceptual_weight_2 * p_loss_2
 
-        nll_loss, weighted_nll_loss = self.get_nll_loss(rec_loss, weights, self.use_mean)
+        nll_loss, weighted_nll_loss = self.get_nll_loss(rec_loss, weights, use_mean=self.use_mean)
 
         # now the GAN part
         if optimizer_idx == 0:
@@ -264,6 +336,21 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
                     loss = loss + self.regularization_weights[k] * regularization_log[k]
                 if k in self.additional_log_keys:
                     log[f"{split}/{k}"] = regularization_log[k].detach().float().mean()
+
+            # metrics
+            if not self.training:
+                metrics_inputs = (inputs.clamp(-1.0, 1.0) + 1.0) / 2.0
+                metrics_reconstructions = (reconstructions.clamp(-1.0, 1.0) + 1.0) / 2.0
+                psnr = kornia.metrics.psnr(metrics_inputs, metrics_reconstructions, max_val=1.0)
+                ssim = kornia.metrics.ssim(metrics_inputs, metrics_reconstructions, window_size=11, max_val=1.0)
+                lpips = p_loss if self.perceptual_weight > 0 else \
+                    self.perceptual_loss(inputs.contiguous(), reconstructions.contiguous())
+
+                log.update({
+                    f"{split}/metrics/psnr": psnr.detach().mean(),
+                    f"{split}/metrics/ssim": ssim.detach().mean(),
+                    f"{split}/metrics/lpips": lpips.detach().mean(),
+                })
 
             log.update(
                 {

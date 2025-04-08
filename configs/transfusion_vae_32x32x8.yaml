@@ -1,0 +1,97 @@
+model:
+  base_learning_rate: 1.0e-4
+  target: sgm.models.autoencoder.AutoencoderKL
+  params:
+    input_key: jpg
+    monitor: "val/loss/rec"
+    disc_start_iter: 50001
+    embed_dim: 8
+
+    ddconfig:
+      attn_type: vanilla-xformers
+      double_z: true
+      z_channels: 8
+      resolution: 256
+      in_channels: 3
+      out_ch: 3
+      ch: 128
+      ch_mult: [1, 2, 4, 4]
+      num_res_blocks: 2
+      attn_resolutions: []
+      dropout: 0.0
+
+    lossconfig:
+      target: sgm.modules.autoencoding.losses.GeneralLPIPSWithDiscriminator
+      params:
+        perceptual_weight: 1.0
+        disc_start: 50001
+        disc_weight: 0.5
+        learn_logvar: false
+
+        perceptual_name: mocov2_800ep
+        perceptual_config:
+          target: sgm.modules.autoencoding.moco.model.moco.MoCo
+          params:
+            arch: resnet50
+            dim: 128
+            K: 65536
+            m: 0.999
+            T: 0.2
+            mlp: true
+        perceptual_weight_2: 0.2
+
+        regularization_weights:
+          kl_loss: 1.0e-6
+
+data:
+  target: sgm.data.imagenet_coco_ffhq.ImageNetCOCOFFHQLoader
+  params:
+    batch_size: 12
+    num_workers: 4
+    prefetch_factor: 2
+    shuffle: true
+
+    train:
+      imagenet_dir: /path/to/ImageNet
+      coco_dir: /path/to/MSCOCO
+      ffhq_dir: /path/to/FFHQ
+      size: 256
+      transform: random_crop
+    validation:
+      imagenet_dir: /path/to/ImageNet
+      coco_dir: /path/to/MSCOCO
+      ffhq_dir: /path/to/FFHQ
+      size: 256
+      transform: random_crop
+
+lightning:
+  strategy:
+    target: pytorch_lightning.strategies.DDPStrategy
+    params:
+      find_unused_parameters: True
+
+  modelcheckpoint:
+    params:
+      every_n_epochs: 1
+
+  callbacks:
+    metrics_over_trainsteps_checkpoint:
+      params:
+        every_n_train_steps: 50000
+
+    image_logger:
+      target: main.ImageLogger
+      params:
+        enable_autocast: False
+        batch_frequency: 1000
+        max_images: 8
+        increase_log_steps: True
+
+  trainer:
+    precision: bf16
+    devices: 0, 1, 2, 3
+    limit_val_batches: 50
+    benchmark: True
+    accumulate_grad_batches: 1
+    check_val_every_n_epoch: 1
+    max_epochs: 50

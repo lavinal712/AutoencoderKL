@@ -1,0 +1,5 @@
+moco_v1_200ep_pretrain.pth
+moco_v2_200ep_pretrain.pth
+moco_v2_800ep_pretrain.pth
+vit-s-300ep.pth
+vit-b-300ep.pth
