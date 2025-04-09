@@ -1,5 +1,6 @@
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
+import kornia
 import numpy as np
 import torch
 import torch.nn as nn
@@ -264,6 +265,21 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
                     loss = loss + self.regularization_weights[k] * regularization_log[k]
                 if k in self.additional_log_keys:
                     log[f"{split}/{k}"] = regularization_log[k].detach().float().mean()
+
+            # metrics
+            if not self.training:
+                metrics_inputs = (inputs + 1.0) / 2.0
+                metrics_reconstructions = (reconstructions + 1.0) / 2.0
+                psnr = kornia.metrics.psnr(metrics_inputs, metrics_reconstructions, max_val=1.0)
+                ssim = kornia.metrics.ssim(metrics_inputs, metrics_reconstructions, window_size=11, max_val=1.0)
+                lpips = p_loss if self.perceptual_weight > 0 else \
+                    self.perceptual_loss(inputs.contiguous(), reconstructions.contiguous())
+
+                log.update({
+                    f"{split}/metrics/psnr": psnr.detach().mean(),
+                    f"{split}/metrics/ssim": ssim.detach().mean(),
+                    f"{split}/metrics/lpips": lpips.detach().mean(),
+                })
 
             log.update(
                 {
