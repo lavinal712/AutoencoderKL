@@ -1,0 +1,91 @@
+model:
+  base_learning_rate: 5.4e-5
+  target: sgm.models.autoencoder.AutoencoderDC
+  params:
+    input_key: jpg
+    monitor: "val/loss/rec"
+    disc_start_iter: 1
+    trainable_ae_params:
+      - ["decoder.project_out"]
+
+    encoder_config:
+      target: sgm.modules.efficientvitmodules.model.EncoderConfig
+      params:
+        in_channels: 3
+        latent_channels: 32
+        block_type: [ResBlock, ResBlock, ResBlock, EViT_GLU, EViT_GLU, EViT_GLU]
+        width_list: [128, 256, 512, 512, 1024, 1024]
+        depth_list: [0, 4, 8, 2, 2, 2]
+
+    decoder_config:
+      target: sgm.modules.efficientvitmodules.model.DecoderConfig
+      params:
+        in_channels: 3
+        latent_channels: 32
+        block_type: [ResBlock, ResBlock, ResBlock, EViT_GLU, EViT_GLU, EViT_GLU]
+        width_list: [128, 256, 512, 512, 1024, 1024]
+        depth_list: [0, 5, 10, 2, 2, 2]
+        norm: [bn2d, bn2d, bn2d, trms2d, trms2d, trms2d]
+        act: [relu, relu, relu, silu, silu, silu]
+
+    loss_config:
+      target: sgm.modules.autoencoding.losses.GeneralLPIPSWithDiscriminator
+      params:
+        perceptual_weight: 0.25
+        disc_start: 1
+        disc_weight: 0.0
+        learn_logvar: false
+        pixel_loss: "l1"
+
+    optimizer_config:
+      target: torch.optim.AdamW
+      params:
+        betas: [0.5, 0.9]
+
+data:
+  target: sgm.data.imagenet.ImageNetLoader
+  params:
+    batch_size: 24
+    num_workers: 4
+    prefetch_factor: 2
+    shuffle: true
+
+    train:
+      root_dir: /path/to/ImageNet
+      size: 256
+      transform: true
+    validation:
+      root_dir: /path/to/ImageNet
+      size: 256
+      transform: true
+
+lightning:
+  strategy:
+    target: pytorch_lightning.strategies.DDPStrategy
+    params:
+      find_unused_parameters: True
+
+  modelcheckpoint:
+    params:
+      every_n_epochs: 1
+
+  callbacks:
+    metrics_over_trainsteps_checkpoint:
+      params:
+        every_n_train_steps: 50000
+
+    image_logger:
+      target: main.ImageLogger
+      params:
+        enable_autocast: False
+        batch_frequency: 1000
+        max_images: 8
+        increase_log_steps: True
+
+  trainer:
+    precision: bf16
+    devices: 0, 1, 2, 3
+    limit_val_batches: 50
+    benchmark: True
+    accumulate_grad_batches: 1
+    check_val_every_n_epoch: 1

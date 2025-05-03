@@ -13,6 +13,7 @@ from packaging import version
 from safetensors.torch import load_file as load_safetensors
 
 from ..modules.autoencoding.regularizers import AbstractRegularizer
+from ..modules.efficientvitmodules.model import Encoder, Decoder
 from ..modules.ema import LitEma
 from ..util import (default, get_nested_attribute, get_obj_from_str,
                     instantiate_from_config)
@@ -527,3 +528,202 @@ class AutoencoderKL(AutoencodingEngineLegacy):
             },
             **kwargs,
         )
+
+
+class AutoencoderDC(AutoencodingEngine):
+    """
+    https://arxiv.org/abs/2410.10733
+    """
+
+    def __init__(
+        self,
+        *args,
+        encoder_config: Dict,
+        decoder_config: Dict,
+        loss_config: Dict,
+        optimizer_config: Union[Dict, None] = None,
+        lr_g_factor: float = 1.0,
+        trainable_ae_params: Optional[List[List[str]]] = None,
+        ae_optimizer_args: Optional[List[dict]] = None,
+        trainable_disc_params: Optional[List[List[str]]] = None,
+        disc_optimizer_args: Optional[List[dict]] = None,
+        disc_start_iter: int = 0,
+        diff_boost_factor: float = 3.0,
+        ckpt_engine: Union[None, str, dict] = None,
+        ckpt_path: Optional[str] = None,
+        **kwargs,
+    ):
+        AbstractAutoencoder.__init__(self, *args, **kwargs)
+        self.automatic_optimization = False  # pytorch lightning
+
+        encoder_config = instantiate_from_config(encoder_config)
+        decoder_config = instantiate_from_config(decoder_config)
+        self.encoder: torch.nn.Module = Encoder(encoder_config)
+        self.decoder: torch.nn.Module = Decoder(decoder_config)
+        self.loss: torch.nn.Module = instantiate_from_config(loss_config)
+        self.optimizer_config = default(
+            optimizer_config, {"target": "torch.optim.AdamW"}
+        )
+        self.diff_boost_factor = diff_boost_factor
+        self.disc_start_iter = disc_start_iter
+        self.lr_g_factor = lr_g_factor
+        self.trainable_ae_params = trainable_ae_params
+        if self.trainable_ae_params is not None:
+            self.ae_optimizer_args = default(
+                ae_optimizer_args,
+                [{} for _ in range(len(self.trainable_ae_params))],
+            )
+            assert len(self.ae_optimizer_args) == len(self.trainable_ae_params)
+        else:
+            self.ae_optimizer_args = [{}]  # makes type consitent
+
+        self.trainable_disc_params = trainable_disc_params
+        if self.trainable_disc_params is not None:
+            self.disc_optimizer_args = default(
+                disc_optimizer_args,
+                [{} for _ in range(len(self.trainable_disc_params))],
+            )
+            assert len(self.disc_optimizer_args) == len(self.trainable_disc_params)
+        else:
+            self.disc_optimizer_args = [{}]  # makes type consitent
+
+        if ckpt_path is not None:
+            assert ckpt_engine is None, "Can't set ckpt_engine and ckpt_path"
+            logpy.warn("Checkpoint path is deprecated, use `checkpoint_egnine` instead")
+        self.apply_ckpt(default(ckpt_path, ckpt_engine))
+
+    @property
+    def spatial_compression_ratio(self) -> int:
+        return 2 ** (self.decoder.num_stages - 1)
+
+    def get_autoencoder_params(self) -> list:
+        params = []
+        if hasattr(self.loss, "get_trainable_autoencoder_parameters"):
+            params += list(self.loss.get_trainable_autoencoder_parameters())
+        params = params + list(self.encoder.parameters())
+        params = params + list(self.decoder.parameters())
+        return params
+
+    def get_last_layer(self):
+        for name, module in self.decoder.project_out.named_modules():
+            if isinstance(module, nn.Conv2d):
+                return module.weight
+        raise ValueError("No last layer found")
+
+    def encode(
+        self,
+        x: torch.Tensor,
+        return_reg_log: bool = False,
+        unregularized: bool = True,
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, dict]]:
+        assert unregularized, "AutoencoderDC does not support regularization"
+        z = self.encoder(x)
+        if unregularized:
+            if return_reg_log:
+                return z, dict()
+            return z
+
+    def decode(self, z: torch.Tensor) -> torch.Tensor:
+        x = self.decoder(z)
+        return x
+
+    def forward(
+        self, x: torch.Tensor, global_step: int = 0
+    ) -> Tuple[torch.Tensor, torch.Tensor, dict]:
+        z, reg_log = self.encode(x, return_reg_log=True)
+        dec = self.decode(z)
+        return z, dec, reg_log
+
+    def inner_training_step(
+        self, batch: dict, batch_idx: int, optimizer_idx: int = 0
+    ) -> torch.Tensor:
+        x = self.get_input(batch)
+        z, xrec, regularization_log = self(x, self.global_step)
+        if hasattr(self.loss, "forward_keys"):
+            extra_info = {
+                "z": z,
+                "optimizer_idx": optimizer_idx,
+                "global_step": self.global_step,
+                "last_layer": self.get_last_layer(),
+                "split": "train",
+                "regularization_log": regularization_log,
+                "autoencoder": self,
+            }
+            extra_info = {k: extra_info[k] for k in self.loss.forward_keys}
+        else:
+            extra_info = dict()
+
+        if optimizer_idx == 0:
+            # autoencode
+            out_loss = self.loss(x, xrec, **extra_info)
+            if isinstance(out_loss, tuple):
+                aeloss, log_dict_ae = out_loss
+            else:
+                # simple loss function
+                aeloss = out_loss
+                log_dict_ae = {"train/loss/rec": aeloss.detach()}
+
+            self.log_dict(
+                log_dict_ae,
+                prog_bar=False,
+                logger=True,
+                on_step=True,
+                on_epoch=True,
+                sync_dist=False,
+            )
+            self.log(
+                "loss",
+                aeloss.mean().detach(),
+                prog_bar=True,
+                logger=True,
+                on_epoch=False,
+                on_step=True,
+            )
+            return aeloss
+        elif optimizer_idx == 1:
+            # discriminator
+            discloss, log_dict_disc = self.loss(x, xrec, **extra_info)
+            # -> discriminator always needs to return a tuple
+            self.log_dict(
+                log_dict_disc, prog_bar=False, logger=True, on_step=True, on_epoch=True
+            )
+            return discloss
+        else:
+            raise NotImplementedError(f"Unknown optimizer {optimizer_idx}")
+
+    @torch.no_grad()
+    def log_images(
+        self, batch: dict, additional_log_kwargs: Optional[Dict] = None, **kwargs
+    ) -> dict:
+        log = dict()
+        x = self.get_input(batch)
+
+        _, xrec, _ = self(x)
+        log["inputs"] = x
+        log["reconstructions"] = xrec
+        diff = 0.5 * torch.abs(torch.clamp(xrec, -1.0, 1.0) - x)
+        diff.clamp_(0, 1.0)
+        log["diff"] = 2.0 * diff - 1.0
+        # diff_boost shows location of small errors, by boosting their
+        # brightness.
+        log["diff_boost"] = (
+            2.0 * torch.clamp(self.diff_boost_factor * diff, 0.0, 1.0) - 1
+        )
+        if hasattr(self.loss, "log_images"):
+            log.update(self.loss.log_images(x, xrec))
+        with self.ema_scope():
+            _, xrec_ema, _ = self(x)
+            log["reconstructions_ema"] = xrec_ema
+            diff_ema = 0.5 * torch.abs(torch.clamp(xrec_ema, -1.0, 1.0) - x)
+            diff_ema.clamp_(0, 1.0)
+            log["diff_ema"] = 2.0 * diff_ema - 1.0
+            log["diff_boost_ema"] = (
+                2.0 * torch.clamp(self.diff_boost_factor * diff_ema, 0.0, 1.0) - 1
+            )
+        if additional_log_kwargs:
+            _, xrec_add, _ = self(x)
+            log_str = "reconstructions-" + "-".join(
+                [f"{key}={additional_log_kwargs[key]}" for key in additional_log_kwargs]
+            )
+            log[log_str] = xrec_add
+        return log
