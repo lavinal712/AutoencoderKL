@@ -1,0 +1,90 @@
+model:
+  base_learning_rate: 1.0e-4
+  target: sgm.models.autoencoder.AutoencodingEngine
+  params:
+    input_key: jpg
+    monitor: "val/loss/rec"
+    disc_start_iter: 50001
+
+    encoder_config:
+      target: sgm.modules.vaemodules.model.ViTEncoder
+      params:
+        conv_last_layer: true
+        depth: 24
+        double_z: true
+        embed_dim: 1024
+        in_chans: 3
+        ln_in_attn: true
+        mlp_ratio: 4
+        norm_code: false
+        num_heads: 16
+        patch_size: 8
+        qkv_bias: true
+        img_size: 256
+        z_chans: 16
+
+    decoder_config:
+      target: sgm.modules.vaemodules.model.ViTDecoder
+      params: ${model.params.encoder_config.params}
+
+    regularizer_config:
+      target: sgm.modules.autoencoding.regularizers.DiagonalGaussianRegularizer
+
+    loss_config:
+      target: sgm.modules.autoencoding.losses.GeneralLPIPSWithDiscriminator
+      params:
+        perceptual_weight: 0.25
+        disc_start: 50001
+        disc_weight: 0.0
+        learn_logvar: false
+        pixel_loss: "l1"
+        regularization_weights:
+          kl_loss: 1.0e-6
+
+data:
+  target: sgm.data.imagenet.ImageNetLoader
+  params:
+    batch_size: 16
+    num_workers: 4
+    prefetch_factor: 2
+    shuffle: true
+
+    train:
+      root_dir: /home/azureuser/v-yuqianhong/ImageNet/ILSVRC2012
+      size: 256
+      transform: true
+    validation:
+      root_dir: /home/azureuser/v-yuqianhong/ImageNet/ILSVRC2012
+      size: 256
+      transform: true
+
+lightning:
+  strategy:
+    target: pytorch_lightning.strategies.DDPStrategy
+    params:
+      find_unused_parameters: True
+
+  modelcheckpoint:
+    params:
+      every_n_epochs: 1
+
+  callbacks:
+    metrics_over_trainsteps_checkpoint:
+      params:
+        every_n_train_steps: 50000
+
+    image_logger:
+      target: main.ImageLogger
+      params:
+        enable_autocast: False
+        batch_frequency: 1000
+        max_images: 8
+        increase_log_steps: True
+
+  trainer:
+    precision: bf16
+    devices: 0, 1, 2, 3
+    limit_val_batches: 50
+    benchmark: True
+    accumulate_grad_batches: 1
+    check_val_every_n_epoch: 1
