@@ -9,6 +9,12 @@ There are many great training scripts for VAE on Github. However, some repositor
 - A practical guidance of training VAE.
 - Easy to modify the code for your own research.
 
+## Visualization
+
+This is the visualization of AutoencoderKL. From left to right, there are the original image, the reconstructed image and the difference between them. From top to bottom, there are the results of SD VAE, SDXL VAE and FLUX VAE.
+
+![baka](assets/visualization.png)
+
 <!-- GETTING STARTED -->
 ## Getting Started
 
@@ -67,6 +73,14 @@ torchrun --nproc_per_node=${NUM_GPUS} --nnodes=${NUM_NODES} eval.py \
     --batch_size 16 \
     --num_workers 16 \
 ```
+
+Here are the evaluation results on ImageNet.
+
+| Model         | rFID  | PSNR   | SSIM  | LPIPS |
+| ------------- | ----- | ------ | ----- | ----- |
+| sd-vae-ft-mse | 0.692 | 26.910 | 0.772 | 0.130 |
+| sdxl-vae      | 0.665 | 27.376 | 0.794 | 0.122 |
+| flux-vae      | 0.165 | 32.871 | 0.924 | 0.045 |
 
 ### Converting to diffusers
 
