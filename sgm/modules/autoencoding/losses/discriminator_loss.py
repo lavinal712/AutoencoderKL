@@ -253,10 +253,10 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
                         nll_loss, g_loss, last_layer=last_layer
                     )
                 else:
-                    d_weight = torch.tensor(1.0)
+                    d_weight = torch.tensor(1.0, device=inputs.device)
             else:
-                d_weight = torch.tensor(0.0)
-                g_loss = torch.tensor(0.0, requires_grad=True)
+                d_weight = torch.tensor(0.0, device=inputs.device)
+                g_loss = torch.tensor(0.0, requires_grad=True, device=inputs.device)
 
             loss = weighted_nll_loss + d_weight * self.disc_factor * g_loss
             log = dict()
@@ -276,19 +276,19 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
                     self.perceptual_loss(inputs.contiguous(), reconstructions.contiguous())
 
                 log.update({
-                    f"{split}/metrics/psnr": psnr.detach().mean(),
-                    f"{split}/metrics/ssim": ssim.detach().mean(),
-                    f"{split}/metrics/lpips": lpips.detach().mean(),
+                    f"{split}/metrics/psnr": psnr.mean(),
+                    f"{split}/metrics/ssim": ssim.mean(),
+                    f"{split}/metrics/lpips": lpips.mean(),
                 })
 
             log.update(
                 {
-                    f"{split}/loss/total": loss.clone().detach().mean(),
-                    f"{split}/loss/nll": nll_loss.detach().mean(),
-                    f"{split}/loss/rec": rec_loss.detach().mean(),
-                    f"{split}/loss/g": g_loss.detach().mean(),
-                    f"{split}/scalars/logvar": self.logvar.detach(),
-                    f"{split}/scalars/d_weight": d_weight.detach(),
+                    f"{split}/loss/total": loss.clone().mean(),
+                    f"{split}/loss/nll": nll_loss.mean(),
+                    f"{split}/loss/rec": rec_loss.mean(),
+                    f"{split}/loss/g": g_loss.mean(),
+                    f"{split}/scalars/logvar": self.logvar.mean(),
+                    f"{split}/scalars/d_weight": d_weight.mean(),
                 }
             )
 
@@ -304,9 +304,9 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
                 d_loss = torch.tensor(0.0, requires_grad=True)
 
             log = {
-                f"{split}/loss/disc": d_loss.clone().detach().mean(),
-                f"{split}/logits/real": logits_real.detach().mean(),
-                f"{split}/logits/fake": logits_fake.detach().mean(),
+                f"{split}/loss/disc": d_loss.clone().mean(),
+                f"{split}/logits/real": logits_real.mean(),
+                f"{split}/logits/fake": logits_fake.mean(),
             }
             return d_loss, log
         else:

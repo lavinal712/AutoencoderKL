@@ -32,7 +32,7 @@ class LatentLPIPS(nn.Module):
     def forward(self, latent_inputs, latent_predictions, image_inputs, split="train"):
         log = dict()
         loss = (latent_inputs - latent_predictions) ** 2
-        log[f"{split}/latent_l2_loss"] = loss.mean().detach()
+        log[f"{split}/latent_l2_loss"] = loss.mean()
         image_reconstructions = None
         if self.perceptual_weight > 0.0:
             image_reconstructions = self.decoder.decode(latent_predictions)
@@ -44,7 +44,7 @@ class LatentLPIPS(nn.Module):
                 self.latent_weight * loss.mean()
                 + self.perceptual_weight * perceptual_loss.mean()
             )
-            log[f"{split}/perceptual_loss"] = perceptual_loss.mean().detach()
+            log[f"{split}/perceptual_loss"] = perceptual_loss.mean()
 
         if self.perceptual_weight_on_inputs > 0.0:
             image_reconstructions = default(
@@ -69,5 +69,5 @@ class LatentLPIPS(nn.Module):
                 image_inputs.contiguous(), image_reconstructions.contiguous()
             )
             loss = loss + self.perceptual_weight_on_inputs * perceptual_loss2.mean()
-            log[f"{split}/perceptual_loss_on_inputs"] = perceptual_loss2.mean().detach()
+            log[f"{split}/perceptual_loss_on_inputs"] = perceptual_loss2.mean()
         return loss, log
