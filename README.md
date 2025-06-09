@@ -13,6 +13,8 @@ There are many great training scripts for VAE on Github. However, some repositor
 
 This is the visualization of AutoencoderKL. From left to right, there are the original image, the reconstructed image and the difference between them. From top to bottom, there are the results of SD VAE, SDXL VAE and FLUX VAE.
 
+Image source: [https://www.bilibili.com/opus/762402574076739817](https://www.bilibili.com/opus/762402574076739817)
+
 ![baka](assets/visualization.png)
 
 <!-- GETTING STARTED -->
