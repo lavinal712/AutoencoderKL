@@ -4,7 +4,7 @@
 
 There are many great training scripts for VAE on Github. However, some repositories are not maintained and some are not updated to the latest version of PyTorch. Therefore, I decided to create this repository to provide a simple and easy-to-use training script for VAE by Lightning. Beside, the code is easy to transfer to other projects for time saving.
 
-- Support training and finetuning both [Stable Diffusion](https://github.com/CompVis/stable-diffusion) VAE and [Flux](https://github.com/black-forest-labs/flux) VAE.
+- Support training and finetuning both [Stable Diffusion](https://github.com/CompVis/stable-diffusion) VAE and [FLUX](https://github.com/black-forest-labs/flux) VAE.
 - Support evaluating reconstruction quality (FID, PSNR, SSIM, LPIPS).
 - A practical guidance of training VAE.
 - Easy to modify the code for your own research.
