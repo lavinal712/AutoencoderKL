@@ -64,7 +64,7 @@ class ImageNetLoader(pl.LightningDataModule):
                 root_dir=validation.root_dir, split="val", transform=transform
             )
         else:
-            print("Warning: No Validation Datasetdefined, using that one from training")
+            print("Warning: No Validation Dataset defined, using that one from training")
             self.test_dataset = self.train_dataset
 
     def prepare_data(self):
