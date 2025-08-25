@@ -57,11 +57,11 @@ data:
     shuffle: true
 
     train:
-      root_dir: /home/azureuser/v-yuqianhong/ImageNet/ILSVRC2012
+      root_dir: /path/to/ImageNet
       size: 256
       transform: true
     validation:
-      root_dir: /home/azureuser/v-yuqianhong/ImageNet/ILSVRC2012
+      root_dir: /path/to/ImageNet
       size: 256
       transform: true
 
