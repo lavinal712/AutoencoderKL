@@ -6,13 +6,13 @@ This repository is a branch of [lavinal712/AutoencoderKL](https://github.com/lav
 
 Sigma-VAE is proposed by [Multimodal Latent Language Modeling with Next-Token Diffusion](https://arxiv.org/abs/2412.08635) to prevent variance collapse by enforcing a fixed variance in the latent space. The reconstruction pass is computed as:
 
-$$
+```math
 \begin{aligned}
 \mu &= \text{Encoder}_\phi(x) \\
 z &= \mu + \sigma \odot \epsilon, \quad \text{where } \epsilon \sim \mathcal{N}(0,1),\ \sigma \sim \mathcal{N}(0,C_\sigma) \\
 \hat{x} &= \text{Decoder}_\psi(z)
 \end{aligned}
-$$
+```
 
 In [NextStep-1: Toward Autoregressive Image Generation with Continuous Tokens at Scale](https://arxiv.org/abs/2508.10711), they find that **a regularized latent space is critical for generation**. Specifically, applying higher noise intensity during tokenizer training increases generation loss but paradoxically improves the quality of the generated images. They attribute this phenomenon to noise regularization, cultivating a well-conditioned latent space. This process enhances two key properties: the tokenizer decoder’s robustness to latent perturbations and a more dispersed latent distribution, a property prior work has also found beneficial for generation.
 
