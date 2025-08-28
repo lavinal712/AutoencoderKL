@@ -49,7 +49,7 @@ class ImageNetLoader(pl.LightningDataModule):
         if train.get("transform", None):
             size = train.get("size", 256)
             transform = transforms.Compose([
-                transforms.Resize(size),
+                transforms.Resize(size, interpolation=Image.BICUBIC),
                 transforms.CenterCrop(size),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True),
