@@ -3,6 +3,7 @@ from typing import Optional
 
 import pytorch_lightning as pl
 from omegaconf import DictConfig
+from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 from torchvision.datasets import ImageFolder
