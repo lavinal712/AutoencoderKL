@@ -188,7 +188,7 @@ if __name__ == "__main__":
 
     # data
     transform = transforms.Compose([
-        transforms.Resize(opt.image_size, interpolation=Image.BICUBIC),
+        transforms.Resize(opt.image_size),
         transforms.CenterCrop(opt.image_size),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True),
