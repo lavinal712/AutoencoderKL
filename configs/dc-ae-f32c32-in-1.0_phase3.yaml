@@ -33,7 +33,7 @@ model:
       params:
         perceptual_weight: 0.25
         disc_start: 1
-        disc_weight: 0.0
+        disc_weight: 0.5
         learn_logvar: false
         pixel_loss: "l1"
 
