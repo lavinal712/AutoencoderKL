@@ -302,6 +302,7 @@ class AutoencodingEngine(AbstractAutoencoder):
                 batch, batch_idx, optimizer_idx=optimizer_idx
             )
             self.manual_backward(loss)
+            self.clip_gradients(opt, gradient_clip_val=1.0, gradient_clip_algorithm="norm")
         opt.step()
 
     def validation_step(self, batch: dict, batch_idx: int) -> Dict:
