@@ -1,0 +1,97 @@
+model:
+  base_learning_rate: 1.0e-4
+  target: sgm.models.autoencoder.AutoencoderKLSigma
+  params:
+    input_key: jpg
+    monitor: "val/loss/rec"
+    disc_start_iter: 50001
+    ckpt_path: stepfun-ai/NextStep-1-f8ch16-Tokenizer/checkpoint.pt
+    trainable_ae_params:
+      - ["decoder"]
+    noise_strength: 0.5 # 0.0 for evaluation
+
+    encoder_config:
+      target: sgm.modules.diffusionmodules.model.Encoder
+      params:
+        attn_type: vanilla-xformers
+        double_z: true
+        z_channels: 16
+        resolution: 256
+        in_channels: 3
+        out_ch: 3
+        ch: 128
+        ch_mult: [1, 2, 4, 4]
+        num_res_blocks: 2
+        attn_resolutions: []
+        dropout: 0.0
+
+    decoder_config:
+      target: sgm.modules.diffusionmodules.model.Decoder
+      params: ${model.params.encoder_config.params}
+
+    regularizer_config:
+      target: sgm.modules.autoencoding.regularizers.DiagonalGaussianRegularizer
+      params:
+        sample: true
+        deterministic: true
+        normalize_latents: true
+        patch_size: 2
+
+    loss_config:
+      target: sgm.modules.autoencoding.losses.GeneralLPIPSWithDiscriminator
+      params:
+        perceptual_weight: 0.25
+        disc_start: 50001
+        disc_weight: 0.0
+        learn_logvar: false
+        pixel_loss: "l2"
+        regularization_weights:
+          kl_loss: 1.0
+
+data:
+  target: sgm.data.imagenet.ImageNetLoader
+  params:
+    batch_size: 16
+    num_workers: 4
+    prefetch_factor: 2
+    shuffle: true
+
+    train:
+      root_dir: /path/to/ImageNet
+      size: 256
+      transform: true
+    validation:
+      root_dir: /path/to/ImageNet
+      size: 256
+      transform: true
+
+lightning:
+  strategy:
+    target: pytorch_lightning.strategies.DDPStrategy
+    params:
+      find_unused_parameters: True
+
+  modelcheckpoint:
+    params:
+      every_n_epochs: 1
+
+  callbacks:
+    metrics_over_trainsteps_checkpoint:
+      params:
+        every_n_train_steps: 50000
+
+    image_logger:
+      target: main.ImageLogger
+      params:
+        enable_autocast: False
+        batch_frequency: 1000
+        max_images: 8
+        increase_log_steps: True
+
+  trainer:
+    precision: bf16
+    devices: 0, 1, 2, 3
+    limit_val_batches: 50
+    benchmark: True
+    accumulate_grad_batches: 1
+    check_val_every_n_epoch: 1

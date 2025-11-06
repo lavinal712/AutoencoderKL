@@ -54,6 +54,8 @@ class AbstractAutoencoder(pl.LightningModule):
             sd = torch.load(ckpt, map_location="cpu")["state_dict"]
         elif ckpt.endswith("safetensors"):
             sd = load_safetensors(ckpt)
+        elif ckpt.endswith("pt"):
+            sd = torch.load(ckpt, map_location="cpu")
         else:
             raise NotImplementedError
 
@@ -528,3 +530,19 @@ class AutoencoderKL(AutoencodingEngineLegacy):
             },
             **kwargs,
         )
+
+
+class AutoencoderKLSigma(AutoencodingEngine):
+    def __init__(self, noise_strength: float = 0.0, **kwargs):
+        super().__init__(**kwargs)
+        self.noise_strength = noise_strength
+
+    def forward(
+        self, x: torch.Tensor, **additional_decode_kwargs
+    ) -> Tuple[torch.Tensor, torch.Tensor, dict]:
+        z, reg_log = self.encode(x, return_reg_log=True)
+        if self.noise_strength > 0.0:
+            p = torch.distributions.Uniform(0, self.noise_strength)
+            z = z + p.sample((z.shape[0],)).reshape(-1, 1, 1, 1).to(z.device) * torch.randn_like(z)
+        dec = self.decode(z, **additional_decode_kwargs)
+        return z, dec, reg_log
