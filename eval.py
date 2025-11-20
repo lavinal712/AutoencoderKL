@@ -8,6 +8,7 @@ from itertools import chain
 import numpy as np
 import torch
 import torch.distributed as dist
+from diffusers import AutoencoderKL
 from natsort import natsorted
 from omegaconf import OmegaConf
 from packaging import version
@@ -34,6 +35,12 @@ def get_parser(**parser_kwargs):
         default="",
         nargs="?",
         help="resume from logdir or checkpoint in logdir",
+    )
+    parser.add_argument(
+        "--use_hf",
+        action="store_true",
+        default=False,
+        help="whether to use huggingface model",
     )
     parser.add_argument(
         "-b",
@@ -123,6 +130,23 @@ def get_checkpoint_name(logdir):
     return ckpt, melk_ckpt_name
 
 
+def create_npz_from_sample_folder(sample_dir, num=50_000):
+    """
+    Builds a single .npz file from a folder of .png samples.
+    """
+    samples = []
+    for i in tqdm(range(num), desc="Building .npz file from samples"):
+        sample_pil = Image.open(f"{sample_dir}/{i:06d}.png")
+        sample_np = np.asarray(sample_pil).astype(np.uint8)
+        samples.append(sample_np)
+    samples = np.stack(samples)
+    assert samples.shape == (num, samples.shape[1], samples.shape[2], 3)
+    npz_path = f"{sample_dir}.npz"
+    np.savez(npz_path, arr_0=samples)
+    print(f"Saved .npz file to {npz_path} [shape={samples.shape}].")
+    return npz_path
+
+
 if __name__ == "__main__":
     parser = get_parser()
 
@@ -132,7 +156,7 @@ if __name__ == "__main__":
         raise ValueError(
             "-r/--resume or --resume_from_checkpoint must be specified."
         )
-    if opt.resume:
+    if opt.resume and not opt.use_hf:
         if not os.path.exists(opt.resume):
             raise ValueError("Cannot find {}".format(opt.resume))
         if os.path.isfile(opt.resume):
@@ -155,10 +179,9 @@ if __name__ == "__main__":
         base_configs = sorted(glob.glob(os.path.join(logdir, "configs/*.yaml")))
         opt.base = base_configs + opt.base
 
-    logdir = opt.logdir
-    os.makedirs(logdir, exist_ok=True)
-    os.makedirs(os.path.join(logdir, "gt"), exist_ok=True)
-    os.makedirs(os.path.join(logdir, "rec"), exist_ok=True)
+    os.makedirs(opt.logdir, exist_ok=True)
+    os.makedirs(os.path.join(opt.logdir, "inputs"), exist_ok=True)
+    os.makedirs(os.path.join(opt.logdir, "reconstructions"), exist_ok=True)
 
     # Setup PyTorch:
     assert torch.cuda.is_available(), "Sampling with DDP requires at least one GPU. sample.py supports CPU-only usage"
@@ -167,19 +190,25 @@ if __name__ == "__main__":
     # Setup DDP:
     dist.init_process_group("nccl")
     rank = dist.get_rank()
+    world_size = dist.get_world_size()
     device = rank % torch.cuda.device_count()
-    seed = opt.seed * dist.get_world_size() + rank
+    seed = opt.seed * world_size + rank
     torch.manual_seed(seed)
     torch.cuda.set_device(device)
-    print(f"Starting rank={rank}, seed={seed}, world_size={dist.get_world_size()}.")
-
-    configs = [OmegaConf.load(cfg) for cfg in opt.base]
-    cli = OmegaConf.from_dotlist(unknown)
-    config = OmegaConf.merge(*configs, cli)
+    print(f"Starting rank={rank}, seed={seed}, world_size={world_size}.")
 
     # model
-    model = instantiate_from_config(config.model)
-    model.apply_ckpt(opt.resume_from_checkpoint)
+    if not opt.use_hf:
+        configs = [OmegaConf.load(cfg) for cfg in opt.base]
+        cli = OmegaConf.from_dotlist(unknown)
+        config = OmegaConf.merge(*configs, cli)
+        model = instantiate_from_config(config.model)
+        model.apply_ckpt(opt.resume_from_checkpoint)
+    else:
+        try:
+            model = AutoencoderKL.from_pretrained(opt.resume)
+        except:
+            model = AutoencoderKL.from_pretrained(opt.resume, subfolder="vae")
     model.to(device)
     model.eval()
 
@@ -196,7 +225,7 @@ if __name__ == "__main__":
     dataset = ImageNetDataset(opt.datadir, split="val", transform=transform)
     sampler = DistributedSampler(
         dataset,
-        num_replicas=dist.get_world_size(),
+        num_replicas=world_size,
         rank=rank,
         shuffle=False,
         seed=opt.seed,
@@ -211,52 +240,55 @@ if __name__ == "__main__":
         pin_memory=True,
         drop_last=False,
     )
-    print(f"Dataset contains {len(dataset):,} images ({opt.datadir})")   
+    print(f"Dataset contains {len(dataset):,} images ({opt.datadir})")
 
-    eval_steps = 0
     psnr_list = []
     ssim_list = []
     lpips_list = []
-    for batch in tqdm(loader):
+    for step, batch in tqdm(enumerate(loader), total=len(loader), disable=rank != 0):
         x = batch["jpg"].to(device)
-        gt = x.detach().cpu().permute(0, 2, 3, 1).numpy()
-        gt = ((gt + 1.0) / 2.0).clip(0.0, 1.0)
+        inputs = x.detach().cpu().permute(0, 2, 3, 1).numpy()
+        inputs = ((inputs + 1.0) / 2.0).clip(0.0, 1.0)
 
         with torch.no_grad():
-            z = model.encode(x)
-            x_hat = model.decode(z)
+            if not opt.use_hf:
+                z = model.encode(x)
+                x_hat = model.decode(z)
+            else:
+                z = model.encode(x).latent_dist.sample()
+                x_hat = model.decode(z).sample
             lpips = perceptual_model(x, x_hat)
-        x_hat = x_hat.detach().cpu().permute(0, 2, 3, 1).numpy()
-        x_hat = ((x_hat + 1.0) / 2.0).clip(0.0, 1.0)
+        reconstructions = x_hat.detach().cpu().permute(0, 2, 3, 1).numpy()
+        reconstructions = ((reconstructions + 1.0) / 2.0).clip(0.0, 1.0)
 
         index_list = []
-        gt_img_list = []
-        x_hat_img_list = []
-        for i, (_gt, _x_hat) in enumerate(zip(gt, x_hat)):
+        input_image_list = []
+        reconstruction_image_list = []
+        for i, (_input, reconstruction) in enumerate(zip(inputs, reconstructions)):
             # metrics
-            psnr = peak_signal_noise_ratio(_gt, _x_hat, data_range=1.0)
-            ssim = structural_similarity(_gt, _x_hat, multichannel=True, channel_axis=-1, data_range=1.0)
+            psnr = peak_signal_noise_ratio(_input, reconstruction, data_range=1.0)
+            ssim = structural_similarity(_input, reconstruction, win_size=11, channel_axis=-1, data_range=1.0)
             psnr_list.append(psnr)
             ssim_list.append(ssim)
             lpips_list.append(lpips[i].item())
 
-            # save images
-            index = i * dist.get_world_size() + rank + eval_steps * opt.batch_size * dist.get_world_size()
-            _gt = (_gt * 255.0).astype(np.uint8)
-            _x_hat = (_x_hat * 255.0).astype(np.uint8)
-            gt_img = Image.fromarray(_gt)
-            x_hat_img = Image.fromarray(_x_hat)
+            # images
+            index = step * opt.batch_size * world_size + i * world_size + rank
+            _input = (_input * 255.0).astype(np.uint8)
+            input_image = Image.fromarray(_input)
+            reconstruction = (reconstruction * 255.0).astype(np.uint8)
+            reconstruction_image = Image.fromarray(reconstruction)
             index_list.append(index)
-            gt_img_list.append(gt_img)
-            x_hat_img_list.append(x_hat_img)
+            input_image_list.append(input_image)
+            reconstruction_image_list.append(reconstruction_image)
+
+        # save images
         with ThreadPoolExecutor(max_workers=max(32, os.cpu_count() * 3)) as executor:
-            for index, gt_img, x_hat_img in zip(index_list, gt_img_list, x_hat_img_list):
-                executor.submit(gt_img.save, os.path.join(logdir, "gt", f"{index:06d}.png"))
-                executor.submit(x_hat_img.save, os.path.join(logdir, "rec", f"{index:06d}.png"))
+            for index, input_image, reconstruction_image in zip(index_list, input_image_list, reconstruction_image_list):
+                executor.submit(input_image.save, os.path.join(opt.logdir, "inputs", f"{index:06d}.png"))
+                executor.submit(reconstruction_image.save, os.path.join(opt.logdir, "reconstructions", f"{index:06d}.png"))
 
-        eval_steps += 1
-
-    world_size = dist.get_world_size()
+    # gather
     gather_psnr_list = [None for _ in range(world_size)]
     gather_ssim_list = [None for _ in range(world_size)]
     gather_lpips_list = [None for _ in range(world_size)]
@@ -271,16 +303,14 @@ if __name__ == "__main__":
         lpips_list = list(chain(*gather_lpips_list))
 
         # rFID
-        command = f"python -m pytorch_fid {os.path.join(logdir, 'gt')} {os.path.join(logdir, 'rec')} --device cuda:{rank}"
+        command = f"python -m pytorch_fid {os.path.join(opt.logdir, 'inputs')} {os.path.join(opt.logdir, 'reconstructions')} --device cuda:{rank}"
         result = subprocess.run(command, shell=True, capture_output=True, text=True)
         rfid = float(result.stdout.split(" ")[-1])
 
-        np.savez(os.path.join(logdir, "results.npz"), psnr=np.array(psnr_list), ssim=np.array(ssim_list), lpips=np.array(lpips_list))
-        with open(os.path.join(logdir, "results.txt"), "w") as f:
-            f.write(f"PSNR: {np.mean(psnr_list)} ± {np.std(psnr_list)}\n")
-            f.write(f"SSIM: {np.mean(ssim_list)} ± {np.std(ssim_list)}\n")
-            f.write(f"LPIPS: {np.mean(lpips_list)} ± {np.std(lpips_list)}\n")
-            f.write(f"rFID: {rfid}\n")
+        print(f"PSNR: {np.mean(psnr_list)} ± {np.std(psnr_list)}")
+        print(f"SSIM: {np.mean(ssim_list)} ± {np.std(ssim_list)}")
+        print(f"LPIPS: {np.mean(lpips_list)} ± {np.std(lpips_list)}")
+        print(f"rFID: {rfid}")
 
     dist.barrier()
     dist.destroy_process_group()

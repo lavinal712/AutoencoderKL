@@ -1,5 +1,7 @@
+diffusers==0.33.0
 einops==0.8.0
 fsspec==2025.2.0
+huggingface-hub==0.33.0
 kornia==0.7.4
 matplotlib==3.7.0
 natsort==8.4.0
