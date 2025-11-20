@@ -303,6 +303,8 @@ if __name__ == "__main__":
         lpips_list = list(chain(*gather_lpips_list))
 
         # rFID
+        # create_npz_from_sample_folder(os.path.join(opt.logdir, "inputs"))
+        # create_npz_from_sample_folder(os.path.join(opt.logdir, "reconstructions"))
         command = f"python -m pytorch_fid {os.path.join(opt.logdir, 'inputs')} {os.path.join(opt.logdir, 'reconstructions')} --device cuda:{rank}"
         result = subprocess.run(command, shell=True, capture_output=True, text=True)
         rfid = float(result.stdout.split(" ")[-1])
