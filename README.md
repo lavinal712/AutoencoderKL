@@ -76,13 +76,26 @@ torchrun --nproc_per_node=${NUM_GPUS} --nnodes=${NUM_NODES} eval.py \
     --num_workers 16 \
 ```
 
+You can evaluate huggingface weights by enabling `use_hf`:
+
+```bash
+torchrun --nproc_per_node=${NUM_GPUS} --nnodes=${NUM_NODES} eval.py \
+    --resume stabilityai/sd-vae-ft-mse \
+    --use_hf \
+    --logdir eval/sd-vae-ft-mse \
+    --datadir /path/to/ImageNet \
+    --image_size 256 \
+    --batch_size 16 \
+    --num_workers 16 \
+```
+
 Here are the evaluation results on ImageNet.
 
 | Model         | rFID  | PSNR   | SSIM  | LPIPS |
 | ------------- | ----- | ------ | ----- | ----- |
-| sd-vae-ft-mse | 0.692 | 26.910 | 0.772 | 0.130 |
-| sdxl-vae      | 0.665 | 27.376 | 0.794 | 0.122 |
-| flux-vae      | 0.165 | 32.871 | 0.924 | 0.045 |
+| sd-vae-ft-mse | 0.692 | 26.910 | 0.814 | 0.130 |
+| sdxl-vae      | 0.665 | 27.376 | 0.832 | 0.122 |
+| flux-vae      | 0.165 | 32.871 | 0.941 | 0.045 |
 
 ### Converting to diffusers
 
