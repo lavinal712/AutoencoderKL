@@ -228,7 +228,7 @@ if __name__ == "__main__":
         num_replicas=world_size,
         rank=rank,
         shuffle=False,
-        seed=opt.seed,
+        seed=seed,
         drop_last=False,
     )
     loader = DataLoader(
@@ -240,7 +240,8 @@ if __name__ == "__main__":
         pin_memory=True,
         drop_last=False,
     )
-    print(f"Dataset contains {len(dataset):,} images ({opt.datadir})")
+    if rank == 0:
+        print(f"Dataset contains {len(dataset):,} images ({opt.datadir})")
 
     psnr_list = []
     ssim_list = []
