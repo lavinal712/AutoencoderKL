@@ -82,11 +82,7 @@ You can evaluate huggingface weights by enabling `use_hf`:
 torchrun --nproc_per_node=${NUM_GPUS} --nnodes=${NUM_NODES} eval.py \
     --resume stabilityai/sd-vae-ft-mse \
     --use_hf \
-    --logdir eval/sd-vae-ft-mse \
-    --datadir /path/to/ImageNet \
-    --image_size 256 \
-    --batch_size 16 \
-    --num_workers 16 \
+    ...
 ```
 
 Here are the evaluation results on ImageNet.
@@ -108,6 +104,21 @@ Currently, the script is not updated for all kinds of VAE models, just for SD VA
 python convert_vae_pt_to_diffusers.py \
     --vae_path logs/autoencoder_kl_32x32x4/checkpoints/last.ckpt \
     --dump_path autoencoder_kl_32x32x4 \
+```
+
+To calculate `scaling_factor` and `shift_factor` in `AutoencoderKL`, we provide a script:
+
+```bash
+NUM_GPUS=4
+NUM_NODES=1
+
+torchrun --nproc_per_node=${NUM_GPUS} --nnodes=${NUM_NODES} factor.py \
+    --resume stabilityai/sd-vae-ft-mse \
+    --use_hf \
+    --datadir /path/to/ImageNet \
+    --image_size 256 \
+    --batch_size 16 \
+    --num_workers 16 \
 ```
 
 ## Guidance
