@@ -150,7 +150,7 @@ if __name__ == "__main__":
         opt.base = base_configs + opt.base
 
     # Setup PyTorch:
-    assert torch.cuda.is_available(), "Sampling with DDP requires at least one GPU. sample.py supports CPU-only usage"
+    assert torch.cuda.is_available(), "Sampling with DDP requires at least one GPU."
     torch.set_grad_enabled(False)
 
     # Setup DDP:
