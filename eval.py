@@ -184,7 +184,7 @@ if __name__ == "__main__":
     os.makedirs(os.path.join(opt.logdir, "reconstructions"), exist_ok=True)
 
     # Setup PyTorch:
-    assert torch.cuda.is_available(), "Sampling with DDP requires at least one GPU. sample.py supports CPU-only usage"
+    assert torch.cuda.is_available(), "Sampling with DDP requires at least one GPU."
     torch.set_grad_enabled(False)
 
     # Setup DDP:
