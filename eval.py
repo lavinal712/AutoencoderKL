@@ -268,7 +268,7 @@ if __name__ == "__main__":
         for i, (_input, reconstruction) in enumerate(zip(inputs, reconstructions)):
             # metrics
             psnr = peak_signal_noise_ratio(_input, reconstruction, data_range=1.0)
-            ssim = structural_similarity(_input, reconstruction, win_size=11, channel_axis=-1, data_range=1.0)
+            ssim = structural_similarity(_input, reconstruction, channel_axis=-1, data_range=1.0)
             psnr_list.append(psnr)
             ssim_list.append(ssim)
             lpips_list.append(lpips[i].item())
