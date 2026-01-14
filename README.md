@@ -89,9 +89,9 @@ Here are the evaluation results on ImageNet.
 
 | Model         | rFID  | PSNR   | SSIM  | LPIPS |
 | ------------- | ----- | ------ | ----- | ----- |
-| sd-vae-ft-mse | 0.692 | 26.910 | 0.814 | 0.130 |
-| sdxl-vae      | 0.665 | 27.376 | 0.832 | 0.122 |
-| flux-vae      | 0.165 | 32.871 | 0.941 | 0.045 |
+| sd-vae-ft-mse | 0.692 | 26.910 | 0.772 | 0.130 |
+| sdxl-vae      | 0.665 | 27.376 | 0.794 | 0.122 |
+| flux-vae      | 0.165 | 32.871 | 0.924 | 0.045 |
 
 ### Converting to diffusers
 
