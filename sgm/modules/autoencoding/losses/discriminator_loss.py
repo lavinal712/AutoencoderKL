@@ -12,7 +12,6 @@ from matplotlib import pyplot as plt
 
 from ....util import default, instantiate_from_config
 from ..lpips.loss.lpips import LPIPS
-from ..lpips.model.model import weights_init
 from ..lpips.vqperceptual import hinge_d_loss, vanilla_d_loss
 
 
@@ -72,9 +71,7 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
             },
         )
 
-        self.discriminator = instantiate_from_config(discriminator_config).apply(
-            weights_init
-        )
+        self.discriminator = instantiate_from_config(discriminator_config)
         self.discriminator_iter_start = disc_start
         self.disc_loss = hinge_d_loss if disc_loss == "hinge" else vanilla_d_loss
         self.disc_factor = disc_factor
