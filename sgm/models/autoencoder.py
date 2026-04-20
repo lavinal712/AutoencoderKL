@@ -175,7 +175,7 @@ class AutoencodingEngine(AbstractAutoencoder):
 
         if ckpt_path is not None:
             assert ckpt_engine is None, "Can't set ckpt_engine and ckpt_path"
-            logpy.warn("Checkpoint path is deprecated, use `checkpoint_egnine` instead")
+            logpy.warning("Checkpoint path is deprecated, use `checkpoint_egnine` instead")
         self.apply_ckpt(default(ckpt_path, ckpt_engine))
         self.additional_decode_keys = set(default(additional_decode_keys, []))
 
@@ -368,7 +368,7 @@ class AutoencodingEngine(AbstractAutoencoder):
                         pattern_params.append(param)
                         num_params += param.numel()
                 if len(pattern_params) == 0:
-                    logpy.warn(f"Did not find parameters for pattern {pattern_}")
+                    logpy.warning(f"Did not find parameters for pattern {pattern_}")
                 params.extend(pattern_params)
             groups.append({"params": params, **args})
         return groups, num_params
@@ -546,6 +546,34 @@ class AutoencoderKL(AutoencodingEngineLegacy):
                     "sgm.modules.autoencoding.regularizers"
                     ".DiagonalGaussianRegularizer"
                 )
+            },
+            **kwargs,
+        )
+
+
+class AutoencoderLegacyVQ(AutoencodingEngineLegacy):
+    def __init__(
+        self,
+        embed_dim: int,
+        n_embed: int,
+        sane_index_shape: bool = False,
+        **kwargs,
+    ):
+        if "lossconfig" in kwargs:
+            logpy.warning(f"Parameter `lossconfig` is deprecated, use `loss_config`.")
+            kwargs["loss_config"] = kwargs.pop("lossconfig")
+        super().__init__(
+            embed_dim=embed_dim,
+            regularizer_config={
+                "target": (
+                    "sgm.modules.autoencoding.regularizers.quantize"
+                    ".VectorQuantizer"
+                ),
+                "params": {
+                    "n_e": n_embed,
+                    "e_dim": embed_dim,
+                    "sane_index_shape": sane_index_shape,
+                },
             },
             **kwargs,
         )
