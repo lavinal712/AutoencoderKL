@@ -4,6 +4,7 @@ import kornia
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torchvision
 from einops import rearrange
 from matplotlib import colormaps
@@ -46,7 +47,10 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
         self.scale_input_to_tgt_size = scale_input_to_tgt_size
         assert pixel_loss in ["l1", "l2"]
         assert disc_loss in ["hinge", "vanilla"]
-        self.pixel_loss = lambda x, y: torch.abs(x - y) if pixel_loss == "l1" else torch.pow(x - y, 2)
+        if pixel_loss == "l1":
+            self.pixel_loss = lambda x, y: F.l1_loss(x, y, reduction="none")
+        else:
+            self.pixel_loss = lambda x, y: F.mse_loss(x, y, reduction="none")
         self.perceptual_loss = LPIPS().eval()
         self.perceptual_weight = perceptual_weight
         # output log variance
@@ -120,13 +124,13 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
             logits = torch.from_numpy(logits_np).to(logits.device)
             return rearrange(logits, "b 1 ... c -> b c ...")
 
-        logits_real = torch.nn.functional.interpolate(
+        logits_real = F.interpolate(
             logits_real,
             size=inputs.shape[-2:],
             mode="nearest",
             antialias=False,
         )
-        logits_fake = torch.nn.functional.interpolate(
+        logits_fake = F.interpolate(
             logits_fake,
             size=reconstructions.shape[-2:],
             mode="nearest",
@@ -223,7 +227,7 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
         weights: Union[None, float, torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, dict]:
         if self.scale_input_to_tgt_size:
-            inputs = torch.nn.functional.interpolate(
+            inputs = F.interpolate(
                 inputs, reconstructions.shape[2:], mode="bicubic", antialias=True
             )
 
@@ -266,20 +270,11 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
                 if k in self.additional_log_keys:
                     log[f"{split}/{k}"] = regularization_log[k].detach().float().mean()
 
-            # metrics
+            # compute metrics
             if not self.training:
-                metrics_inputs = (inputs + 1.0) / 2.0
-                metrics_reconstructions = (reconstructions + 1.0) / 2.0
-                psnr = kornia.metrics.psnr(metrics_inputs, metrics_reconstructions, max_val=1.0)
-                ssim = kornia.metrics.ssim(metrics_inputs, metrics_reconstructions, window_size=11, max_val=1.0)
-                lpips = p_loss if self.perceptual_weight > 0 else \
-                    self.perceptual_loss(inputs.contiguous(), reconstructions.contiguous())
-
-                log.update({
-                    f"{split}/metrics/psnr": psnr.mean(),
-                    f"{split}/metrics/ssim": ssim.mean(),
-                    f"{split}/metrics/lpips": lpips.mean(),
-                })
+                metrics = self.compute_metrics(inputs, reconstructions)
+                for k, v in metrics.items():
+                    log[f"{split}/metrics/{k}"] = v.detach().float().mean()
 
             log.update(
                 {
@@ -291,6 +286,8 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
                     f"{split}/scalars/d_weight": d_weight.mean(),
                 }
             )
+            if self.perceptual_weight > 0:
+                log.update({f"{split}/loss/p": p_loss.mean()})
 
             return loss, log
         elif optimizer_idx == 1:
@@ -330,3 +327,22 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
             nll_loss = torch.mean(nll_loss)
 
         return nll_loss, weighted_nll_loss
+
+    def compute_metrics(
+        self,
+        inputs: torch.Tensor,
+        reconstructions: torch.Tensor,
+    ) -> Dict[str, torch.Tensor]:
+        inputs_rescaled = (inputs + 1.0) / 2.0
+        reconstructions_rescaled = (reconstructions + 1.0) / 2.0
+        psnr = kornia.metrics.psnr(inputs_rescaled, reconstructions_rescaled, max_val=1.0)
+        ssim = kornia.metrics.ssim(
+            inputs_rescaled, reconstructions_rescaled, window_size=11, max_val=1.0
+        )
+        lpips = self.perceptual_loss(inputs.contiguous(), reconstructions.contiguous())
+
+        return {
+            "psnr": psnr.mean(),
+            "ssim": ssim.mean(),
+            "lpips": lpips.mean(),
+        }

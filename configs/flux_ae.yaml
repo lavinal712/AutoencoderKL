@@ -89,3 +89,4 @@ lightning:
     benchmark: True
     accumulate_grad_batches: 1
     check_val_every_n_epoch: 1
+    max_epochs: 1000

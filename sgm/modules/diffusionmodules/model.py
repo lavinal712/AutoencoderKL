@@ -6,6 +6,7 @@ from typing import Any, Callable, Optional
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from einops import rearrange
 from packaging import version
 
@@ -40,7 +41,7 @@ def get_timestep_embedding(timesteps, embedding_dim):
     emb = timesteps.float()[:, None] * emb[None, :]
     emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=1)
     if embedding_dim % 2 == 1:  # zero pad
-        emb = torch.nn.functional.pad(emb, (0, 1, 0, 0))
+        emb = F.pad(emb, (0, 1, 0, 0))
     return emb
 
 
@@ -65,7 +66,7 @@ class Upsample(nn.Module):
             )
 
     def forward(self, x):
-        x = torch.nn.functional.interpolate(x, scale_factor=2.0, mode="nearest")
+        x = F.interpolate(x, scale_factor=2.0, mode="nearest-exact")
         if self.with_conv:
             x = self.conv(x)
         return x
@@ -84,10 +85,10 @@ class Downsample(nn.Module):
     def forward(self, x):
         if self.with_conv:
             pad = (0, 1, 0, 1)
-            x = torch.nn.functional.pad(x, pad, mode="constant", value=0)
+            x = F.pad(x, pad, mode="constant", value=0)
             x = self.conv(x)
         else:
-            x = torch.nn.functional.avg_pool2d(x, kernel_size=2, stride=2)
+            x = F.avg_pool2d(x, kernel_size=2, stride=2)
         return x
 
 
@@ -187,7 +188,7 @@ class AttnBlock(nn.Module):
         q, k, v = map(
             lambda x: rearrange(x, "b c h w -> b 1 (h w) c").contiguous(), (q, k, v)
         )
-        h_ = torch.nn.functional.scaled_dot_product_attention(
+        h_ = F.scaled_dot_product_attention(
             q, k, v
         )  # scale is dim ** -0.5 per default
         # compute attention

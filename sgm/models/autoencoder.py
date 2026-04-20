@@ -11,6 +11,7 @@ import torch.nn as nn
 from einops import rearrange
 from packaging import version
 from safetensors.torch import load_file as load_safetensors
+from torch.optim.lr_scheduler import LambdaLR
 
 from ..modules.autoencoding.regularizers import AbstractRegularizer
 from ..modules.ema import LitEma
@@ -58,13 +59,13 @@ class AbstractAutoencoder(pl.LightningModule):
             raise NotImplementedError
 
         missing, unexpected = self.load_state_dict(sd, strict=False)
-        print(
+        logpy.info(
             f"Restored from {ckpt} with {len(missing)} missing and {len(unexpected)} unexpected keys"
         )
         if len(missing) > 0:
-            print(f"Missing Keys: {missing}")
+            logpy.info(f"Missing Keys: {missing}")
         if len(unexpected) > 0:
-            print(f"Unexpected Keys: {unexpected}")
+            logpy.info(f"Unexpected Keys: {unexpected}")
 
     @abstractmethod
     def get_input(self, batch) -> Any:
@@ -123,6 +124,7 @@ class AutoencodingEngine(AbstractAutoencoder):
         loss_config: Dict,
         regularizer_config: Dict,
         optimizer_config: Union[Dict, None] = None,
+        scheduler_config: Union[Dict, None] = None,
         lr_g_factor: float = 1.0,
         trainable_ae_params: Optional[List[List[str]]] = None,
         ae_optimizer_args: Optional[List[dict]] = None,
@@ -147,6 +149,7 @@ class AutoencodingEngine(AbstractAutoencoder):
         self.optimizer_config = default(
             optimizer_config, {"target": "torch.optim.Adam"}
         )
+        self.scheduler_config = scheduler_config
         self.diff_boost_factor = diff_boost_factor
         self.disc_start_iter = disc_start_iter
         self.lr_g_factor = lr_g_factor
@@ -398,6 +401,24 @@ class AutoencodingEngine(AbstractAutoencoder):
                 disc_params, self.learning_rate, self.optimizer_config
             )
             opts.append(opt_disc)
+
+        if self.scheduler_config is not None:
+            scheduler = instantiate_from_config(self.scheduler_config)
+            logpy.info("Setting up LambdaLR scheduler...")
+            schedulers = [
+                {
+                    "scheduler": LambdaLR(opts[0], lr_lambda=scheduler.schedule),
+                    "interval": "step",
+                    "frequency": 1,
+                }
+            ]
+            if len(opts) > 1:
+                schedulers.append({
+                    "scheduler": LambdaLR(opts[1], lr_lambda=scheduler.schedule),
+                    "interval": "step",
+                    "frequency": 1,
+                })
+            return opts, schedulers
 
         return opts
 
