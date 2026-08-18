@@ -56,6 +56,20 @@ torchrun --nproc_per_node=${NUM_GPUS} --nnodes=${NUM_NODES} main.py \
 
 ### Evaluation
 
+**New**: Evaluation metrics are now computed and aggregated with `torchmetrics` during validation and testing. PSNR and SSIM are enabled by default as online metrics.
+
+```bash
+NUM_GPUS=4
+NUM_NODES=1
+
+torchrun --nproc_per_node=${NUM_GPUS} --nnodes=${NUM_NODES} main.py \
+    --base configs/autoencoder_kl_32x32x4.yaml \
+    --train False \
+    --resume logs/autoencoder_kl_32x32x4 \
+    --base configs/autoencoder_kl_32x32x4.yaml \
+    --logdir eval/autoencoder_kl_32x32x4 \
+```
+
 We provide a script to evaluate the reconstruction quality of the trained model. `--resume` provides a convenient way to load the checkpoint from the log directory.
 
 We introduce multi-GPU and multi-thread method for faster evaluation.

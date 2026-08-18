@@ -16,7 +16,9 @@ Requests==2.32.3
 safetensors==0.5.2
 scikit-image==0.22.0
 torch==2.5.1
+torchmetrics==1.9.0
 torchvision==0.20.1
+torch-fidelity==0.3.0
 tqdm==4.67.1
 wandb==0.19.6
 xformers==0.0.29.post1

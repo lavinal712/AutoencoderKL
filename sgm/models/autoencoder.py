@@ -12,6 +12,7 @@ from einops import rearrange
 from packaging import version
 from safetensors.torch import load_file as load_safetensors
 from torch.optim.lr_scheduler import LambdaLR
+from torchmetrics import MetricCollection
 
 from ..modules.autoencoding.regularizers import AbstractRegularizer
 from ..modules.ema import LitEma
@@ -135,6 +136,7 @@ class AutoencodingEngine(AbstractAutoencoder):
         ckpt_engine: Union[None, str, dict] = None,
         ckpt_path: Optional[str] = None,
         additional_decode_keys: Optional[List[str]] = None,
+        metrics_config: Optional[Dict] = None,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
@@ -178,6 +180,8 @@ class AutoencodingEngine(AbstractAutoencoder):
             logpy.warning("Checkpoint path is deprecated, use `checkpoint_egnine` instead")
         self.apply_ckpt(default(ckpt_path, ckpt_engine))
         self.additional_decode_keys = set(default(additional_decode_keys, []))
+
+        self.init_metrics(metrics_config)
 
     def get_input(self, batch: Dict) -> torch.Tensor:
         # assuming unified data format, dataloader returns a dict.
@@ -308,11 +312,16 @@ class AutoencodingEngine(AbstractAutoencoder):
             self.clip_gradients(opt, gradient_clip_val=1.0, gradient_clip_algorithm="norm")
         opt.step()
 
+    def on_validation_epoch_start(self) -> None:
+        self.val_metrics.reset()
+        self.val_ema_metrics.reset()
+
     def validation_step(self, batch: dict, batch_idx: int) -> Dict:
         log_dict = self._validation_step(batch, batch_idx)
-        with self.ema_scope():
-            log_dict_ema = self._validation_step(batch, batch_idx, postfix="_ema")
-            log_dict.update(log_dict_ema)
+        if self.use_ema:
+            with self.ema_scope():
+                log_dict_ema = self._validation_step(batch, batch_idx, postfix="_ema")
+                log_dict.update(log_dict_ema)
         return log_dict
 
     def _validation_step(self, batch: dict, batch_idx: int, postfix: str = "") -> Dict:
@@ -351,7 +360,98 @@ class AutoencodingEngine(AbstractAutoencoder):
             sync_dist=True,
         )
         self.log_dict(full_log_dict, sync_dist=True)
+
+        if postfix == "_ema":
+            self.update_metrics(self.val_ema_metrics, x, xrec)
+        else:
+            self.update_metrics(self.val_metrics, x, xrec)
+
         return full_log_dict
+
+    def on_validation_epoch_end(self) -> None:
+        metrics = self.val_metrics.compute()
+        if self.use_ema:
+            metrics.update(self.val_ema_metrics.compute())
+
+        self.log_dict(
+            metrics,
+            prog_bar=True,
+            logger=True,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+        )
+        self.val_metrics.reset()
+        if self.use_ema:
+            self.val_ema_metrics.reset()
+
+    def on_test_epoch_start(self) -> None:
+        self.test_metrics.reset()
+
+    def test_step(self, batch: dict, batch_idx: int) -> None:
+        x = self.get_input(batch)
+        z, xrec, regularization_log = self(x)
+        self.update_metrics(self.test_metrics, x, xrec)
+
+    def on_test_epoch_end(self) -> None:
+        test_metrics = self.test_metrics.compute()
+
+        self.log_dict(
+            test_metrics,
+            prog_bar=True,
+            logger=True,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+        )
+        self.test_metrics.reset()
+
+    def init_metrics(self, metrics_config: Dict):
+        self.metrics_config = default(
+            metrics_config,
+            {
+                "psnr": {
+                    "target": "torchmetrics.image.PeakSignalNoiseRatio",
+                    "params": {
+                        "data_range": 1.0,
+                        "dim": [1, 2, 3],
+                        "reduction": "elementwise_mean",
+                    },
+                },
+                "ssim": {
+                    "target": "torchmetrics.image.StructuralSimilarityIndexMeasure",
+                    "params": {
+                        "data_range": 1.0,
+                        "gaussian_kernel": True,
+                        "sigma": 1.5,
+                        "kernel_size": 11,
+                        "reduction": "elementwise_mean",
+                    },
+                },
+            },
+        )
+        metrics = MetricCollection({
+            name: instantiate_from_config(config)
+            for name, config in self.metrics_config.items()
+        })
+        self.val_metrics = metrics.clone(prefix="val/metrics/")
+        self.val_ema_metrics = metrics.clone(prefix="val_ema/metrics/")
+        self.test_metrics = metrics.clone(prefix="test/metrics/")
+
+    def update_metrics(
+        self,
+        metrics: MetricCollection,
+        x: torch.Tensor,
+        xrec: torch.Tensor,
+        normalize: bool = True,
+        dtype: torch.dtype = torch.float32,
+    ) -> None:
+        if normalize:
+            x = ((x.to(dtype) + 1.0) / 2.0).clamp(0.0, 1.0)
+            xrec = ((xrec.to(dtype) + 1.0) / 2.0).clamp(0.0, 1.0)
+
+        with torch.amp.autocast(device_type=x.device.type, dtype=dtype, enabled=False):
+            metrics.update(xrec, x)
 
     def get_param_groups(
         self, parameter_names: List[List[str]], optimizer_args: List[dict]
@@ -494,6 +594,8 @@ class AutoencodingEngineLegacy(AutoencodingEngine):
 
     def get_autoencoder_params(self) -> list:
         params = super().get_autoencoder_params()
+        params += list(self.quant_conv.parameters())
+        params += list(self.post_quant_conv.parameters())
         return params
 
     def encode(
