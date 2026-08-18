@@ -234,17 +234,17 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
                 (inputs, reconstructions),
             )
 
-        rec_loss = self.pixel_loss(inputs.contiguous(), reconstructions.contiguous())
-        if self.perceptual_weight > 0:
-            p_loss = self.perceptual_loss(
-                inputs.contiguous(), reconstructions.contiguous()
-            )
-            rec_loss = rec_loss + self.perceptual_weight * p_loss
-
-        nll_loss, weighted_nll_loss = self.get_nll_loss(rec_loss, weights, self.use_mean)
-
         # now the GAN part
         if optimizer_idx == 0:
+            rec_loss = self.pixel_loss(inputs.contiguous(), reconstructions.contiguous())
+            if self.perceptual_weight > 0:
+                p_loss = self.perceptual_loss(
+                    inputs.contiguous(), reconstructions.contiguous()
+                )
+                rec_loss = rec_loss + self.perceptual_weight * p_loss
+
+            nll_loss, weighted_nll_loss = self.get_nll_loss(rec_loss, weights, self.use_mean)
+
             # generator update
             if global_step >= self.discriminator_iter_start or not self.training:
                 logits_fake = self.discriminator(reconstructions.contiguous())
@@ -267,12 +267,6 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
                 if k in self.additional_log_keys:
                     log[f"{split}/{k}"] = regularization_log[k].detach().float().mean()
 
-            # compute metrics
-            if not self.training:
-                metrics = self.compute_metrics(inputs, reconstructions)
-                for k, v in metrics.items():
-                    log[f"{split}/metrics/{k}"] = v.detach().float().mean()
-
             log.update(
                 {
                     f"{split}/loss/total": loss.clone().mean(),
@@ -284,7 +278,10 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
                 }
             )
             if self.perceptual_weight > 0:
-                log.update({f"{split}/loss/p": p_loss.mean()})
+                if split.startswith("val"):
+                    log.update({f"{split}/metrics/lpips": p_loss.mean()})
+                else:
+                    log.update({f"{split}/loss/p": p_loss.mean()})
 
             return loss, log
         elif optimizer_idx == 1:
@@ -324,22 +321,3 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
             nll_loss = torch.mean(nll_loss)
 
         return nll_loss, weighted_nll_loss
-
-    def compute_metrics(
-        self,
-        inputs: torch.Tensor,
-        reconstructions: torch.Tensor,
-    ) -> Dict[str, torch.Tensor]:
-        inputs_rescaled = (inputs + 1.0) / 2.0
-        reconstructions_rescaled = (reconstructions + 1.0) / 2.0
-        psnr = kornia.metrics.psnr(inputs_rescaled, reconstructions_rescaled, max_val=1.0)
-        ssim = kornia.metrics.ssim(
-            inputs_rescaled, reconstructions_rescaled, window_size=11, max_val=1.0
-        )
-        lpips = self.perceptual_loss(inputs.contiguous(), reconstructions.contiguous())
-
-        return {
-            "psnr": psnr.mean(),
-            "ssim": ssim.mean(),
-            "lpips": lpips.mean(),
-        }
