@@ -311,6 +311,11 @@ class AutoencodingEngine(AbstractAutoencoder):
             self.manual_backward(loss)
             self.clip_gradients(opt, gradient_clip_val=1.0, gradient_clip_algorithm="norm")
         opt.step()
+        schedulers = self.lr_schedulers()
+        if schedulers is not None:
+            if not isinstance(schedulers, list):
+                schedulers = [schedulers]
+            schedulers[optimizer_idx].step()
 
     def on_validation_epoch_start(self) -> None:
         self.val_metrics.reset()

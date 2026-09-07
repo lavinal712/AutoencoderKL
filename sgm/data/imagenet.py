@@ -19,7 +19,8 @@ class ImageNetDataset(Dataset):
         return len(self.dataset)
 
     def __getitem__(self, idx):
-        return {"jpg": self.dataset[idx][0], "cls": self.dataset[idx][1]}
+        image, label = self.dataset[idx]
+        return {"jpg": image, "cls": label}
 
 
 class ImageNetLoader(pl.LightningDataModule):
@@ -38,7 +39,7 @@ class ImageNetLoader(pl.LightningDataModule):
 
         self.batch_size = batch_size
         self.num_workers = num_workers if num_workers is not None else batch_size * 2
-        self.prefetch_factor = prefetch_factor
+        self.prefetch_factor = prefetch_factor if self.num_workers > 0 else None
         self.shuffle = shuffle
         self.shuffle_test_loader = shuffle_test_loader
         self.shuffle_val_dataloader = shuffle_val_dataloader
