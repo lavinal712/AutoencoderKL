@@ -74,7 +74,7 @@ lightning:
         increase_log_steps: True
 
   trainer:
-    precision: bf16
+    precision: 32-true
     devices: 0, 1, 2, 3
     limit_val_batches: 50
     benchmark: True

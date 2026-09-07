@@ -38,3 +38,19 @@ def measure_perplexity(
     perplexity = (-(avg_probs * torch.log(avg_probs + 1e-10)).sum()).exp()
     cluster_use = torch.sum(avg_probs > 0)
     return perplexity, cluster_use
+
+
+def compute_entropy_loss(affinity, loss_type="softmax", temperature=0.01):
+    flat_affinity = affinity.reshape(-1, affinity.shape[-1])
+    flat_affinity /= temperature
+    probs = F.softmax(flat_affinity, dim=-1)
+    log_probs = F.log_softmax(flat_affinity + 1e-5, dim=-1)
+    if loss_type == "softmax":
+        target_probs = probs
+    else:
+        raise ValueError("Entropy loss {} not supported".format(loss_type))
+    avg_probs = torch.mean(target_probs, dim=0)
+    avg_entropy = - torch.sum(avg_probs * torch.log(avg_probs + 1e-5))
+    sample_entropy = - torch.mean(torch.sum(target_probs * log_probs, dim=-1))
+    loss = sample_entropy - avg_entropy
+    return loss

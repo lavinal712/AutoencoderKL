@@ -659,6 +659,9 @@ class AutoencoderLegacyVQ(AutoencodingEngineLegacy):
         embed_dim: int,
         n_embed: int,
         sane_index_shape: bool = False,
+        log_perplexity: bool = False,
+        entropy_loss_ratio: float = 0.0,
+        l2_norm: bool = False,
         **kwargs,
     ):
         if "lossconfig" in kwargs:
@@ -675,6 +678,9 @@ class AutoencoderLegacyVQ(AutoencodingEngineLegacy):
                     "n_e": n_embed,
                     "e_dim": embed_dim,
                     "sane_index_shape": sane_index_shape,
+                    "log_perplexity": log_perplexity,
+                    "entropy_loss_ratio": entropy_loss_ratio,
+                    "l2_norm": l2_norm,
                 },
             },
             **kwargs,
