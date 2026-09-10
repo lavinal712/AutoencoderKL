@@ -207,11 +207,12 @@ class VectorQuantizer(AbstractQuantizer):
         self.l2_norm = l2_norm
         self.loss_key = loss_key
 
+        assert not (embedding_weight_norm and l2_norm)
         if not embedding_weight_norm:
             self.embedding = nn.Embedding(self.n_e, self.e_dim)
             self.embedding.weight.data.uniform_(-1.0 / self.n_e, 1.0 / self.n_e)
         else:
-            self.embedding = torch.nn.utils.weight_norm(
+            self.embedding = torch.nn.utils.parametrizations.weight_norm(
                 nn.Embedding(self.n_e, self.e_dim), dim=1
             )
 
@@ -273,14 +274,11 @@ class VectorQuantizer(AbstractQuantizer):
         d.add_(torch.sum(z_flattened**2, dim=1, keepdim=True))
 
         min_encoding_indices = torch.argmin(d, dim=1)
-        if self.l2_norm:
-            z_q = F.embedding(min_encoding_indices, embedding).view(z.shape)
-        else:
-            z_q = self.embedding(min_encoding_indices).view(z.shape)
+        z_q = F.embedding(min_encoding_indices, embedding).view(z.shape)
         loss_dict = {}
         if self.log_perplexity:
             perplexity, cluster_usage = measure_perplexity(
-                min_encoding_indices.detach(), self.n_e
+                min_encoding_indices.detach(), self.n_e, self.training
             )
             loss_dict.update({"perplexity": perplexity, "cluster_usage": cluster_usage})
 
@@ -827,7 +825,7 @@ class LookupFreeQuantizer(AbstractQuantizer):
         self.register_buffer(
             "codebook", self.bits_to_codes(bits.float()), persistent=False
         )
-    
+
     def bits_to_codes(self, bits: torch.Tensor) -> torch.Tensor:
         return (bits * 2.0 - 1.0) * self.codebook_scale
 
@@ -890,7 +888,7 @@ class LookupFreeQuantizer(AbstractQuantizer):
                 z = torch.tanh(z / clamp_value) * clamp_value
             if self.spherical:
                 z = F.normalize(z, dim=-1) * self.codebook_scale
-            
+
             bits = z > 0
             indices = (bits.long() * self._bit_mask).sum(dim=-1)
             z_q = self.bits_to_codes(bits.to(z.dtype))
@@ -916,7 +914,7 @@ class LookupFreeQuantizer(AbstractQuantizer):
                 self.entropy_loss_weight * entropy_loss
                 + self.commitment_loss_weight * commitment_loss
             )
-        
+
         z_q = z_q.to(orig_dtype).flatten(-2)
         z_q = self.project_out(z_q)
 

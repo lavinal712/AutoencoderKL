@@ -2,6 +2,7 @@ from abc import abstractmethod
 from typing import Any, Tuple
 
 import torch
+import torch.distributed as dist
 import torch.nn.functional as F
 from torch import nn
 
@@ -27,14 +28,15 @@ class IdentityRegularizer(AbstractRegularizer):
 
 
 def measure_perplexity(
-    predicted_indices: torch.Tensor, num_centroids: int
+    predicted_indices: torch.Tensor, num_centroids: int, sync_dist: bool = False
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     # src: https://github.com/karpathy/deep-vector-quantization/blob/main/model.py
     # eval cluster perplexity. when perplexity == num_embeddings then all clusters are used exactly equally
-    encodings = (
-        F.one_hot(predicted_indices, num_centroids).float().reshape(-1, num_centroids)
-    )
-    avg_probs = encodings.mean(0)
+    counts = torch.bincount(predicted_indices.reshape(-1), minlength=num_centroids)
+    if sync_dist and dist.is_available() and dist.is_initialized():
+        dist.all_reduce(counts, op=dist.ReduceOp.SUM)
+    counts = counts.float()
+    avg_probs = counts / counts.sum().clamp_min(1.0)
     perplexity = (-(avg_probs * torch.log(avg_probs + 1e-10)).sum()).exp()
     cluster_use = torch.sum(avg_probs > 0)
     return perplexity, cluster_use
