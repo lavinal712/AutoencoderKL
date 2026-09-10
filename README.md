@@ -4,9 +4,9 @@
 
 There are many great training scripts for VAE on Github. However, some repositories are not maintained and some are not updated to the latest version of PyTorch. Therefore, I decided to create this repository to provide a simple and easy-to-use training script for VAE by Lightning. Beside, the code is easy to transfer to other projects for time saving.
 
-- **New:** Support VQGAN-style training with Residual Quantization (RQ), Finite Scalar Quantization (FSQ), and Lookup-Free Quantization (LFQ).
+- **New**: Support training VQ-VAE and VQGAN models with Vector Quantization (VQ), Residual Vector Quantization (RVQ), Finite Scalar Quantization (FSQ), and Lookup-Free Quantization (LFQ).
 - Support training and finetuning both [Stable Diffusion](https://github.com/CompVis/stable-diffusion) VAE and [FLUX](https://github.com/black-forest-labs/flux) VAE.
-- Support evaluating reconstruction quality (FID, PSNR, SSIM, LPIPS).
+- Support evaluating reconstruction quality (rFID, PSNR, SSIM, LPIPS).
 - A practical guidance of training VAE.
 - Easy to modify the code for your own research.
 
@@ -151,3 +151,8 @@ Thanks for the following repositories. Without their code, this project would no
 
 - [Stability-AI/generative-models](https://github.com/Stability-AI/generative-models). We heavily borrow the code from this repository, just modifing a few parameters for our concept.
 - [CompVis/latent-diffusion](https://github.com/CompVis/latent-diffusion). We follow the hyperparameter settings of this repository in config files.
+- [FoundationVision/LlamaGen](https://github.com/FoundationVision/LlamaGen).
+- [kakaobrain/rq-vae-transformer](https://github.com/kakaobrain/rq-vae-transformer)
+- [duchenzhuang/FSQ-pytorch](https://github.com/duchenzhuang/FSQ-pytorch).
+- [lucidrains/vector-quantize-pytorch](https://github.com/lucidrains/vector-quantize-pytorch).
+- [bytetriper/RAE](https://github.com/bytetriper/RAE). 
