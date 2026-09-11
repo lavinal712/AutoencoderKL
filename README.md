@@ -1,5 +1,7 @@
 # AutoencoderKL
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/lavinal712/AutoencoderKL)
+
 ## About The Project
 
 There are many great training scripts for VAE on Github. However, some repositories are not maintained and some are not updated to the latest version of PyTorch. Therefore, I decided to create this repository to provide a simple and easy-to-use training script for VAE by Lightning. Beside, the code is easy to transfer to other projects for time saving.
