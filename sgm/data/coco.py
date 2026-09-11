@@ -62,15 +62,17 @@ class COCOLoader(pl.LightningDataModule):
         shuffle: bool = False,
         shuffle_test_loader: bool = False,
         shuffle_val_dataloader: bool = False,
+        drop_last: bool = False,
     ):
         super().__init__()
 
         self.batch_size = batch_size
         self.num_workers = num_workers if num_workers is not None else batch_size * 2
-        self.prefetch_factor = prefetch_factor
+        self.prefetch_factor = prefetch_factor if self.num_workers > 0 else None
         self.shuffle = shuffle
         self.shuffle_test_loader = shuffle_test_loader
         self.shuffle_val_dataloader = shuffle_val_dataloader
+        self.drop_last = drop_last
 
         transform = transforms.Compose(
             [transforms.ToTensor(), transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])]
@@ -105,6 +107,7 @@ class COCOLoader(pl.LightningDataModule):
             shuffle=self.shuffle,
             num_workers=self.num_workers,
             prefetch_factor=self.prefetch_factor,
+            drop_last=self.drop_last,
         )
 
     def test_dataloader(self):
@@ -114,6 +117,7 @@ class COCOLoader(pl.LightningDataModule):
             shuffle=self.shuffle_test_loader,
             num_workers=self.num_workers,
             prefetch_factor=self.prefetch_factor,
+            drop_last=self.drop_last,
         )
 
     def val_dataloader(self):
@@ -123,4 +127,5 @@ class COCOLoader(pl.LightningDataModule):
             shuffle=self.shuffle_val_dataloader,
             num_workers=self.num_workers,
             prefetch_factor=self.prefetch_factor,
+            drop_last=self.drop_last,
         )

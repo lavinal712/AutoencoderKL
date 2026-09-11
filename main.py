@@ -442,25 +442,23 @@ class ImageLogger(Callback):
                 pl_module.train()
 
     def check_frequency(self, check_idx):
-        if ((check_idx % self.batch_freq) == 0 or (check_idx in self.log_steps)) and (
-            check_idx > 0 or self.log_first_step
-        ):
-            try:
-                self.log_steps.pop(0)
-            except IndexError as e:
-                print(e)
-                pass
-            return True
-        return False
+        return (check_idx > 0 or self.log_first_step) and (
+            check_idx % self.batch_freq == 0 or check_idx in self.log_steps
+        )
 
     @rank_zero_only
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+        if not outputs or "optimizer_idx" not in outputs:
+            return
         if not self.disabled and (pl_module.global_step > 0 or self.log_first_step):
             self.log_img(pl_module, batch, batch_idx, split="train")
 
     @rank_zero_only
     def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
-        if self.log_before_first_step and pl_module.global_step == 0:
+        if (
+            not self.disabled and self.log_before_first_step
+            and pl_module.global_step == 0 and batch_idx == 0
+        ):
             print(f"{self.__class__.__name__}: logging before training")
             self.log_img(pl_module, batch, batch_idx, split="train")
 
@@ -468,7 +466,7 @@ class ImageLogger(Callback):
     def on_validation_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx, *args, **kwargs
     ):
-        if not self.disabled and pl_module.global_step > 0:
+        if not self.disabled and pl_module.global_step > 0 and batch_idx == 0:
             self.log_img(pl_module, batch, batch_idx, split="val")
         if hasattr(pl_module, "calibrate_grad_norm"):
             if (
@@ -854,12 +852,8 @@ if __name__ == "__main__":
             ngpu = len(lightning_config.trainer.devices.strip(",").split(","))
         else:
             ngpu = 1
-        if "accumulate_grad_batches" in lightning_config.trainer:
-            accumulate_grad_batches = lightning_config.trainer.accumulate_grad_batches
-        else:
-            accumulate_grad_batches = 1
+        accumulate_grad_batches = model.accumulate_grad_batches
         print(f"accumulate_grad_batches = {accumulate_grad_batches}")
-        lightning_config.trainer.accumulate_grad_batches = accumulate_grad_batches
         if opt.scale_lr:
             model.learning_rate = accumulate_grad_batches * ngpu * bs * base_lr
             print(

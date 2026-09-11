@@ -39,17 +39,17 @@ class AbstractAutoencoder(pl.LightningModule):
 
         self.input_key = input_key
         self.use_ema = ema_decay is not None
+        self.ema_decay = ema_decay
         if monitor is not None:
             self.monitor = monitor
-
-        if self.use_ema:
-            self.model_ema = LitEma(self, decay=ema_decay)
-            logpy.info(f"Keeping EMAs of {len(list(self.model_ema.buffers()))}.")
 
         if version.parse(torch.__version__) >= version.parse("2.0.0"):
             self.automatic_optimization = False
 
     def apply_ckpt(self, ckpt: Union[None, str, dict]):
+        if self.use_ema:
+            self.model_ema = LitEma(self, decay=self.ema_decay)
+
         if ckpt is None:
             return
         if ckpt.endswith("ckpt"):
@@ -67,15 +67,12 @@ class AbstractAutoencoder(pl.LightningModule):
             logpy.info(f"Missing Keys: {missing}")
         if len(unexpected) > 0:
             logpy.info(f"Unexpected Keys: {unexpected}")
+        if self.use_ema and any(key.startswith("model_ema.") for key in missing):
+            self.model_ema = LitEma(self, decay=self.ema_decay)
 
     @abstractmethod
     def get_input(self, batch) -> Any:
         raise NotImplementedError()
-
-    def on_train_batch_end(self, *args, **kwargs):
-        # for EMA computation
-        if self.use_ema:
-            self.model_ema(self)
 
     @contextmanager
     def ema_scope(self, context=None):
@@ -137,10 +134,13 @@ class AutoencodingEngine(AbstractAutoencoder):
         ckpt_path: Optional[str] = None,
         additional_decode_keys: Optional[List[str]] = None,
         metrics_config: Optional[Dict] = None,
+        accumulate_grad_batches: int = 1,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
         self.automatic_optimization = False  # pytorch lightning
+        self.accumulate_grad_batches = accumulate_grad_batches
+        assert isinstance(accumulate_grad_batches, int) and accumulate_grad_batches > 0
 
         self.encoder: torch.nn.Module = instantiate_from_config(encoder_config)
         self.decoder: torch.nn.Module = instantiate_from_config(decoder_config)
@@ -299,23 +299,40 @@ class AutoencodingEngine(AbstractAutoencoder):
         if not isinstance(opts, list):
             # Non-adversarial case
             opts = [opts]
-        optimizer_idx = batch_idx % len(opts)
+        n = self.accumulate_grad_batches
+        group_idx, group_offset = divmod(batch_idx, n)
+        group_size = min(
+            n, self.trainer.num_training_batches - group_idx * n
+        )
+        should_step = group_offset + 1 == group_size
+        optimizer_idx = group_idx % len(opts)
         if self.global_step < self.disc_start_iter:
             optimizer_idx = 0
         opt = opts[optimizer_idx]
-        opt.zero_grad()
-        with opt.toggle_model():
+        if group_offset == 0:
+            opt.zero_grad()
+        with opt.toggle_model(sync_grad=should_step):
             loss = self.inner_training_step(
                 batch, batch_idx, optimizer_idx=optimizer_idx
             )
-            self.manual_backward(loss)
-            self.clip_gradients(opt, gradient_clip_val=1.0, gradient_clip_algorithm="norm")
+            self.manual_backward(loss / group_size)
+            if not should_step:
+                return
+            self.clip_gradients(
+                opt, gradient_clip_val=1.0, gradient_clip_algorithm="norm"
+            )
         opt.step()
         schedulers = self.lr_schedulers()
         if schedulers is not None:
             if not isinstance(schedulers, list):
                 schedulers = [schedulers]
             schedulers[optimizer_idx].step()
+
+        if self.use_ema and optimizer_idx == 0:
+            self.model_ema(self)
+
+        # return after optimizer update
+        return {"optimizer_idx": optimizer_idx}
 
     def on_validation_epoch_start(self) -> None:
         self.val_metrics.reset()
