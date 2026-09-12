@@ -301,13 +301,13 @@ def make_attn(in_channels, attn_type="vanilla", attn_kwargs=None):
             f"building MemoryEfficientAttnBlock with {in_channels} in_channels..."
         )
         return MemoryEfficientAttnBlock(in_channels)
-    elif type == "memory-efficient-cross-attn":
+    elif attn_type == "memory-efficient-cross-attn":
         attn_kwargs["query_dim"] = in_channels
         return MemoryEfficientCrossAttentionWrapper(**attn_kwargs)
-    elif attn_type == "none":
-        return nn.Identity(in_channels)
-    else:
+    elif attn_type == "linear":
         return LinAttnBlock(in_channels)
+    else:
+        return nn.Identity(in_channels)
 
 
 class Model(nn.Module):

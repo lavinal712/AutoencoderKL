@@ -13,6 +13,7 @@ from packaging import version
 from safetensors.torch import load_file as load_safetensors
 from torch.optim.lr_scheduler import LambdaLR
 from torchmetrics import MetricCollection
+from torchmetrics.image.fid import FrechetInceptionDistance
 
 from ..modules.autoencoding.regularizers import AbstractRegularizer
 from ..modules.ema import LitEma
@@ -335,8 +336,9 @@ class AutoencodingEngine(AbstractAutoencoder):
         return {"optimizer_idx": optimizer_idx}
 
     def on_validation_epoch_start(self) -> None:
-        self.val_metrics.reset()
-        self.val_ema_metrics.reset()
+        self.val_metrics = self.build_metrics("val/metrics/")
+        if self.use_ema:
+            self.val_ema_metrics = self.build_metrics("val_ema/metrics/")
 
     def validation_step(self, batch: dict, batch_idx: int) -> Dict:
         log_dict = self._validation_step(batch, batch_idx)
@@ -403,17 +405,32 @@ class AutoencodingEngine(AbstractAutoencoder):
             on_epoch=True,
             sync_dist=True,
         )
-        self.val_metrics.reset()
-        if self.use_ema:
-            self.val_ema_metrics.reset()
+
+        self.release_metrics("val_metrics", "val_ema_metrics")
 
     def on_test_epoch_start(self) -> None:
-        self.test_metrics.reset()
+        self.test_metrics = self.build_metrics("test/metrics/")
 
     def test_step(self, batch: dict, batch_idx: int) -> None:
         x = self.get_input(batch)
-        z, xrec, regularization_log = self(x)
+        if self.use_ema:
+            with self.ema_scope():
+                z, xrec, regularization_log = self(x)
+        else:
+            z, xrec, regularization_log = self(x)
+
         self.update_metrics(self.test_metrics, x, xrec)
+        if hasattr(self.loss, "get_metrics"):
+            loss_metrics = self.loss.get_metrics(x, xrec)
+            for name, value in loss_metrics.items():
+                self.log(
+                    f"test/metrics/{name}",
+                    value.mean(),
+                    on_step=False,
+                    on_epoch=True,
+                    sync_dist=True,
+                    batch_size=x.shape[0],
+                )
 
     def on_test_epoch_end(self) -> None:
         test_metrics = self.test_metrics.compute()
@@ -426,7 +443,8 @@ class AutoencodingEngine(AbstractAutoencoder):
             on_epoch=True,
             sync_dist=True,
         )
-        self.test_metrics.reset()
+
+        self.release_metrics("test_metrics")
 
     def init_metrics(self, metrics_config: Dict):
         self.metrics_config = default(
@@ -452,13 +470,25 @@ class AutoencodingEngine(AbstractAutoencoder):
                 },
             },
         )
-        metrics = MetricCollection({
-            name: instantiate_from_config(config)
-            for name, config in self.metrics_config.items()
-        })
-        self.val_metrics = metrics.clone(prefix="val/metrics/")
-        self.val_ema_metrics = metrics.clone(prefix="val_ema/metrics/")
-        self.test_metrics = metrics.clone(prefix="test/metrics/")
+        self.val_metrics = None
+        self.val_ema_metrics = None
+        self.test_metrics = None
+
+    def build_metrics(self, prefix: str):
+        return MetricCollection(
+            {
+                name: instantiate_from_config(config)
+                for name, config in self.metrics_config.items()
+            },
+            prefix=prefix,
+        ).to(self.device)
+
+    def release_metrics(self, *metric_names: str) -> None:
+        for name in metric_names:
+            if getattr(self, name, None) is not None:
+                setattr(self, name, None)
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     def update_metrics(
         self,
@@ -473,7 +503,12 @@ class AutoencodingEngine(AbstractAutoencoder):
             xrec = ((xrec.to(dtype) + 1.0) / 2.0).clamp(0.0, 1.0)
 
         with torch.amp.autocast(device_type=x.device.type, dtype=dtype, enabled=False):
-            metrics.update(xrec, x)
+            for metric in metrics.values():
+                if isinstance(metric, FrechetInceptionDistance):
+                    metric.update(x, real=True)
+                    metric.update(xrec, real=False)
+                else:
+                    metric.update(xrec, x)
 
     def get_param_groups(
         self, parameter_names: List[List[str]], optimizer_args: List[dict]

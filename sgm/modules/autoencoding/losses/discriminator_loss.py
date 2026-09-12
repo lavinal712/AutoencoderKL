@@ -321,3 +321,15 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
             nll_loss = torch.mean(nll_loss)
 
         return nll_loss, weighted_nll_loss
+
+    @torch.no_grad()
+    def get_metrics(
+        self,
+        inputs: torch.Tensor,
+        reconstructions: torch.Tensor,
+    ) -> Dict[str, torch.Tensor]:
+        return {
+            "lpips": self.perceptual_loss(
+                inputs.contiguous(), reconstructions.contiguous()
+            )
+        }

@@ -897,7 +897,10 @@ if __name__ == "__main__":
                     melk()
                 raise
         if not opt.no_test and not trainer.interrupted:
-            trainer.test(model, data)
+            if opt.train:
+                trainer.test(model, data)
+            else:
+                trainer.test(model, data, ckpt_path=ckpt_resume_path)
     except RuntimeError as err:
         if MULTINODE_HACKS:
             import datetime
