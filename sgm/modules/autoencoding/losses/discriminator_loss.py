@@ -97,6 +97,11 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
             yield self.logvar
         yield from ()
 
+    def train(self, mode: bool = True):
+        super().train(mode)
+        self.perceptual_loss.eval()
+        return self
+
     @torch.no_grad()
     def log_images(
         self, inputs: torch.Tensor, reconstructions: torch.Tensor

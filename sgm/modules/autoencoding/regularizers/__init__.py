@@ -28,4 +28,6 @@ class DiagonalGaussianRegularizer(AbstractRegularizer):
         kl_loss = posterior.kl()
         kl_loss = torch.sum(kl_loss) / kl_loss.shape[0]
         log["kl_loss"] = kl_loss
+        log["mean"] = posterior.mean
+        log["logvar"] = posterior.logvar
         return z, log
