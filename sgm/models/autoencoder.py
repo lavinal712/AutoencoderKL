@@ -210,6 +210,9 @@ class AutoencodingEngine(AbstractAutoencoder):
     def get_last_layer(self):
         return self.decoder.get_last_layer()
 
+    def get_encoder_last_layer(self):
+        return self.encoder.get_last_layer()
+
     def encode(
         self,
         x: torch.Tensor,
@@ -249,6 +252,7 @@ class AutoencodingEngine(AbstractAutoencoder):
                 "optimizer_idx": optimizer_idx,
                 "global_step": self.global_step,
                 "last_layer": self.get_last_layer(),
+                "encoder_last_layer": self.get_encoder_last_layer(),
                 "split": "train",
                 "regularization_log": regularization_log,
                 "autoencoder": self,
@@ -358,6 +362,7 @@ class AutoencodingEngine(AbstractAutoencoder):
                 "optimizer_idx": 0,
                 "global_step": self.global_step,
                 "last_layer": self.get_last_layer(),
+                "encoder_last_layer": self.get_encoder_last_layer(),
                 "split": "val" + postfix,
                 "regularization_log": regularization_log,
                 "autoencoder": self,

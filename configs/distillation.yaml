@@ -1,43 +1,40 @@
 model:
-  base_learning_rate: 4.5e-6
+  base_learning_rate: 5.0e-5
   target: sgm.models.autoencoder.AutoencoderKL
   params:
     input_key: jpg
     monitor: "val/loss/rec"
     disc_start_iter: 50001
     embed_dim: 4
-    ckpt_path: checkpoints/vae-ft-mse-840000-ema-pruned.ckpt
-    trainable_ae_params:
-      - ["decoder", "post_quant_conv"]
 
     ddconfig:
-      attn_type: vanilla-xformers
+      attn_type: none
       double_z: true
       z_channels: 4
       resolution: 256
       in_channels: 3
       out_ch: 3
-      ch: 128
-      ch_mult: [1, 2, 4, 4]
+      ch: 64
+      ch_mult: [1, 2, 2, 2]
       num_res_blocks: 2
       attn_resolutions: []
       dropout: 0.0
 
     lossconfig:
-      target: sgm.modules.autoencoding.losses.GeneralLPIPSWithDiscriminator
+      target: sgm.modules.autoencoding.losses.DistillationLossWithDiscriminator
       params:
-        perceptual_weight: 0.1
+        pretrained_model_name_or_path: /aiarena/group/gmgroup/hongyq/models/stabilityai/sd-vae-ft-mse
+        latent_weight: 1.0
+        logvar_weight: 0.05
+        pixel_loss: l1
+        perceptual_weight: 0.25
         disc_start: 50001
-        disc_weight: 0.0
-        learn_logvar: false
-        pixel_loss: l2
-        regularization_weights:
-          kl_loss: 1.0e-6
+        disc_weight: 1.0
 
 data:
   target: sgm.data.imagenet.ImageNetLoader
   params:
-    batch_size: 24
+    batch_size: 8
     num_workers: 4
     prefetch_factor: 2
     shuffle: true
