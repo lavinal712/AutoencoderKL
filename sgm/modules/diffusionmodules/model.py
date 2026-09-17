@@ -574,6 +574,9 @@ class Encoder(nn.Module):
             padding=1,
         )
 
+    def get_last_layer(self, **kwargs):
+        return self.conv_out.weight
+
     def forward(self, x):
         # timestep embedding
         temb = None
