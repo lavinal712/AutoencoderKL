@@ -1,4 +1,4 @@
-from typing import Dict, Iterator, Tuple, Union
+from typing import Dict, Iterator, Optional, Tuple, Union
 
 import timm
 import torch
@@ -23,15 +23,24 @@ class VFLossWithDiscriminator(GeneralLPIPSWithDiscriminator):
         distmat_weight: float = 1.0,
         cos_margin: float = 0.0,
         distmat_margin: float = 0.0,
+        checkpoint_path: Optional[str] = None,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
         foundation_model = default(
             foundation_model, "hf-hub:timm/vit_large_patch14_dinov2.lvd142m"
         )
-        self.foundation_model = timm.create_model(
-            foundation_model, pretrained=True, dynamic_img_size=True
-        )
+        if checkpoint_path is None:
+            self.foundation_model = timm.create_model(
+                foundation_model, pretrained=True, dynamic_img_size=True
+            )
+        else:
+            self.foundation_model = timm.create_model(
+                foundation_model,
+                pretrained=False,
+                dynamic_img_size=True,
+                checkpoint_path=checkpoint_path,
+            )
         self.foundation_model.requires_grad_(False)
         self.foundation_model.eval()
 

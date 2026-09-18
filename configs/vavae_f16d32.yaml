@@ -1,35 +1,45 @@
 model:
-  base_learning_rate: 5.0e-5
+  base_learning_rate: 1.0e-4
   target: sgm.models.autoencoder.AutoencoderKL
   params:
     input_key: jpg
     monitor: "val/loss/rec"
     disc_start_iter: 50001
-    embed_dim: 4
+    embed_dim: 32
 
     ddconfig:
-      attn_type: none
+      attn_type: vanilla-xformers
       double_z: true
-      z_channels: 4
+      z_channels: 32
       resolution: 256
       in_channels: 3
       out_ch: 3
-      ch: 64
-      ch_mult: [1, 2, 2, 2]
+      ch: 128
+      ch_mult: [1, 1, 2, 2, 4]
       num_res_blocks: 2
-      attn_resolutions: []
+      attn_resolutions: [16]
       dropout: 0.0
 
     lossconfig:
-      target: sgm.modules.autoencoding.losses.DistillationLossWithDiscriminator
+      target: sgm.modules.autoencoding.losses.VFLossWithDiscriminator
       params:
-        pretrained_model_name_or_path: /aiarena/group/gmgroup/hongyq/models/stabilityai/sd-vae-ft-mse
-        latent_weight: 1.0
-        logvar_weight: 0.05
-        pixel_loss: l1
         perceptual_weight: 0.25
         disc_start: 50001
-        disc_weight: 1.0
+        disc_weight: 0.5
+        learn_logvar: false
+
+        regularization_weights:
+          kl_loss: 1.0e-6
+
+        embed_dim: 32
+        foundation_model: hf-hub:timm/vit_large_patch14_reg4_dinov2.lvd142m
+        reverse_proj: true
+        vf_weight: 0.1
+        adaptive_vf: true
+        cos_weight: 1.0
+        distmat_weight: 1.0
+        cos_margin: 0.5
+        distmat_margin: 0.25
 
 data:
   target: sgm.data.imagenet.ImageNetLoader
