@@ -8,8 +8,8 @@
 
 There are many great training scripts for VAE on Github. However, some repositories are not maintained and some are not updated to the latest version of PyTorch. Therefore, I decided to create this repository to provide a simple and easy-to-use training script for VAE by Lightning. Beside, the code is easy to transfer to other projects for time saving.
 
-- Support training and finetuning both [Stable Diffusion](https://github.com/CompVis/stable-diffusion) VAE and [FLUX](https://github.com/black-forest-labs/flux) VAE.
-- Support training VQ-VAE and VQGAN models with Vector Quantization (VQ), Residual Vector Quantization (RVQ), Finite Scalar Quantization (FSQ), and Lookup-Free Quantization (LFQ).
+- Support training and finetuning both [Stable Diffusion](https://arxiv.org/abs/2112.10752) VAE and [FLUX](https://bfl.ai/blog/24-08-01-bfl) VAE.
+- Support training [VQ-VAE](https://arxiv.org/abs/1711.00937) and [VQGAN](https://arxiv.org/abs/2012.09841) models with Vector Quantization (VQ), Residual Vector Quantization (RVQ), Finite Scalar Quantization (FSQ), and Lookup-Free Quantization (LFQ).
 - Support evaluating reconstruction quality with rFID, PSNR, SSIM, and LPIPS.
 - Provide practical recipes and guidance for training high-quality autoencoders.
 - Research-friendly codebase that is easy to modify and extend for custom architectures, losses, and training strategies.
