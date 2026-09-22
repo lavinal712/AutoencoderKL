@@ -898,7 +898,7 @@ if __name__ == "__main__":
                 raise
         if not opt.no_test and not trainer.interrupted:
             if opt.train:
-                trainer.test(model, data)
+                trainer.test(model, data, ckpt_path="last")
             else:
                 trainer.test(model, data, ckpt_path=ckpt_resume_path)
     except RuntimeError as err:
