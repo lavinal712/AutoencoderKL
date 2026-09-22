@@ -23,7 +23,7 @@ model:
     lossconfig:
       target: sgm.modules.autoencoding.losses.DistillationLossWithDiscriminator
       params:
-        pretrained_model_name_or_path: /aiarena/group/gmgroup/hongyq/models/stabilityai/sd-vae-ft-mse
+        pretrained_model_name_or_path: stabilityai/sd-vae-ft-mse
         latent_weight: 1.0
         logvar_weight: 0.05
         pixel_loss: l1
