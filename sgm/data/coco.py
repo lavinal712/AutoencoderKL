@@ -9,6 +9,8 @@ from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 
+from sgm.data.augmentations import build_transform
+
 
 class COCODataset(Dataset):
     def __init__(self, root_dir, split="train", transform=None):
@@ -74,28 +76,28 @@ class COCOLoader(pl.LightningDataModule):
         self.shuffle_val_dataloader = shuffle_val_dataloader
         self.drop_last = drop_last
 
-        transform = transforms.Compose(
-            [transforms.ToTensor(), transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])]
-        )
-        if train.get("transform", None):
-            size = train.get("size", 256)
-            transform = transforms.Compose([
-                transforms.Resize(size),
-                transforms.CenterCrop(size),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True),
-            ])
-
+        if train is None:
+            raise ValueError("COCOLoader requires a train configuration.")
+        train_transform_config = train.get("transform_config") or dict()
         self.train_dataset = COCODataset(
-            root_dir=train.root_dir, split="train", transform=transform
+            root_dir=train.root_dir,
+            split="train",
+            transform=build_transform(**train_transform_config),
         )
         if validation is not None:
+            val_transform_config = validation.get("transform_config") or dict()
             self.test_dataset = COCODataset(
-                root_dir=validation.root_dir, split="val", transform=transform
+                root_dir=validation.root_dir,
+                split="val",
+                transform=build_transform(**val_transform_config),
             )
         else:
             print("Warning: No Validation Dataset defined, using that one from training")
-            self.test_dataset = self.train_dataset
+            self.test_dataset = COCODataset(
+                root_dir=train.root_dir,
+                split="train",
+                transform=build_transform(),
+            )
 
     def prepare_data(self):
         pass
