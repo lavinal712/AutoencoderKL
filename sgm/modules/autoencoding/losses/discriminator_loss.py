@@ -59,10 +59,11 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
         self.learn_logvar = learn_logvar
         self.use_mean = use_mean
 
+        disc_type = "NLayerDiscriminator" if self.dims == 2 else "NLayerDiscriminator3D"
         discriminator_config = default(
             discriminator_config,
             {
-                "target": "sgm.modules.autoencoding.lpips.model.model.NLayerDiscriminator",
+                "target": f"sgm.modules.autoencoding.lpips.model.model.{disc_type}",
                 "params": {
                     "input_nc": disc_in_channels,
                     "n_layers": disc_num_layers,
@@ -229,18 +230,21 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
         weights: Union[None, float, torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, dict]:
         if self.scale_input_to_tgt_size:
+            assert self.dims == 2
             inputs = F.interpolate(
                 inputs, reconstructions.shape[2:], mode="bicubic", antialias=True
             )
 
-        if self.dims > 2:
-            inputs, reconstructions = map(
-                lambda x: rearrange(x, "b c t h w -> (b t) c h w"),
-                (inputs, reconstructions),
-            )
-
         # now the GAN part
         if optimizer_idx == 0:
+            t = 1
+            if self.dims > 2:
+                t = inputs.shape[2]
+                inputs, reconstructions = map(
+                    lambda x: rearrange(x, "b c t h w -> (b t) c h w"),
+                    (inputs, reconstructions),
+                )
+
             rec_loss = self.pixel_loss(inputs.contiguous(), reconstructions.contiguous())
             if self.perceptual_weight > 0:
                 p_loss = self.perceptual_loss(
@@ -249,6 +253,12 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
                 rec_loss = rec_loss + self.perceptual_weight * p_loss
 
             nll_loss, weighted_nll_loss = self.get_nll_loss(rec_loss, weights, self.use_mean)
+
+            if self.dims > 2:
+                inputs, reconstructions = map(
+                    lambda x: rearrange(x, "(b t) c h w -> b c t h w", t=t),
+                    (inputs, reconstructions),
+                )
 
             # generator update
             if global_step >= self.discriminator_iter_start or not self.training:
@@ -333,6 +343,11 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
         inputs: torch.Tensor,
         reconstructions: torch.Tensor,
     ) -> Dict[str, torch.Tensor]:
+        if self.dims > 2:
+            inputs, reconstructions = map(
+                lambda x: rearrange(x, "b c t h w -> (b t) c h w"),
+                (inputs, reconstructions),
+            )
         return {
             "lpips": self.perceptual_loss(
                 inputs.contiguous(), reconstructions.contiguous()

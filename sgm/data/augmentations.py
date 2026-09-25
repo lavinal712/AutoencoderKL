@@ -1,7 +1,8 @@
 from typing import Any, Mapping, Optional, Sequence, Tuple, Union
 
+import torch
 from omegaconf import OmegaConf
-from torchvision import transforms
+from torchvision.transforms import v2
 
 from sgm.util import instantiate_from_config
 
@@ -41,14 +42,14 @@ def build_transform(
     *,
     image_transforms: Optional[Sequence[TransformConfig]] = None,
     tensor_transforms: Optional[Sequence[TransformConfig]] = None,
-) -> transforms.Compose:
+) -> v2.Compose:
     if image_transforms is None:
         image_ops = []
         if size is not None:
             resize_size = size if isinstance(size, int) else list(size)
             image_ops = [
-                transforms.Resize(resize_size, antialias=True),
-                transforms.CenterCrop(resize_size),
+                v2.Resize(resize_size, antialias=True),
+                v2.CenterCrop(resize_size),
             ]
     else:
         image_ops = [instantiate_transform(config) for config in image_transforms]
@@ -59,9 +60,10 @@ def build_transform(
         else [instantiate_transform(config) for config in tensor_transforms]
     )
 
-    return transforms.Compose([
+    return v2.Compose([
         *image_ops,
-        transforms.ToTensor(),
+        v2.ToImage(),
+        v2.ToDtype(torch.float32, scale=True),
         *tensor_ops,
-        transforms.Normalize(mean=list(mean), std=list(std)),
+        v2.Normalize(mean=list(mean), std=list(std)),
     ])
