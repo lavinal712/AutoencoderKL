@@ -626,6 +626,34 @@ class AutoencodingEngine(AbstractAutoencoder):
             log[log_str] = xrec_add
         return log
 
+    @torch.no_grad()
+    def log_videos(
+        self, batch: dict, additional_log_kwargs: Optional[Dict] = None, **kwargs
+    ) -> dict:
+        log = dict()
+        additional_decode_kwargs = {}
+        x = self.get_input(batch)
+        additional_decode_kwargs.update(
+            {key: batch[key] for key in self.additional_decode_keys.intersection(batch)}
+        )
+
+        _, xrec, _ = self(x, **additional_decode_kwargs)
+        log["inputs"] = x
+        log["reconstructions"] = xrec
+        if hasattr(self.loss, "log_videos"):
+            log.update(self.loss.log_videos(x, xrec))
+        with self.ema_scope():
+            _, xrec_ema, _ = self(x, **additional_decode_kwargs)
+            log["reconstructions_ema"] = xrec_ema
+        if additional_log_kwargs:
+            additional_decode_kwargs.update(additional_log_kwargs)
+            _, xrec_add, _ = self(x, **additional_decode_kwargs)
+            log_str = "reconstructions-" + "-".join(
+                [f"{key}={additional_log_kwargs[key]}" for key in additional_log_kwargs]
+            )
+            log[log_str] = xrec_add
+        return log
+
 
 class AutoencodingEngineLegacy(AutoencodingEngine):
     def __init__(self, embed_dim: int, **kwargs):

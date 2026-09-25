@@ -4,9 +4,11 @@ import glob
 import inspect
 import os
 import sys
+from contextlib import nullcontext
 from inspect import Parameter
-from typing import Union
+from typing import Any, Union
 
+import imageio.v2 as imageio
 import numpy as np
 import pytorch_lightning as pl
 import torch
@@ -475,6 +477,119 @@ class ImageLogger(Callback):
                 self.log_gradients(trainer, pl_module, batch_idx=batch_idx)
 
 
+class VideoLogger(Callback):
+    def __init__(
+        self,
+        max_videos: int = 4,
+        fps: int = 8,
+        clamp: bool = True,
+        rescale: bool = True,
+        disabled: bool = False,
+        log_on_batch_idx=False,
+        log_first_step=False,
+        log_videos_kwargs: Any = None,
+        enable_autocast: bool = True,
+    ):
+        super().__init__()
+        self.enable_autocast = enable_autocast
+        self.max_videos = max_videos
+        self.fps = fps
+        self.rescale = rescale
+        self.clamp = clamp
+        self.disabled = disabled
+        self.log_on_batch_idx = log_on_batch_idx
+        self.log_first_step = log_first_step
+        self.log_videos_kwargs = log_videos_kwargs or {}
+
+    @rank_zero_only
+    def log_local(
+        self,
+        save_dir,
+        split,
+        videos,
+        global_step,
+        current_epoch,
+        batch_idx,
+        pl_module: Union[None, pl.LightningModule] = None,
+    ):
+        root = os.path.join(save_dir, "videos", split)
+        for idx, (key, video) in enumerate(videos.items()):
+            for sample_idx, clip in enumerate(video):
+                if self.rescale:
+                    clip = (clip + 1.0) / 2.0  # -1,1 -> 0,1
+                clip = clip.mul(255).round().to(torch.uint8)
+                frames = clip.permute(0, 2, 3, 1).contiguous().numpy()
+                filename = (
+                    f"{key}_gs-{global_step:06d}_e-{current_epoch:06d}"
+                    f"_b-{batch_idx:06d}_v-{sample_idx:02d}.mp4"
+                )
+                path = os.path.join(root, filename)
+                os.makedirs(os.path.split(path)[0], exist_ok=True)
+                with imageio.get_writer(
+                    path, format="FFMPEG", fps=self.fps, codec="libx264",
+                    pixelformat="yuv420p", quality=7, macro_block_size=1,
+                ) as writer:
+                    for frame in frames:
+                        writer.append_data(frame)
+                if exists(pl_module):
+                    assert isinstance(
+                        pl_module.logger, WandbLogger
+                    ), "logger_log_video only supports WandbLogger currently"
+                    pl_module.logger.experiment.log({
+                        f"{split}/{key}/video_{sample_idx}": wandb.Video(path, format="mp4"),
+                        "trainer/global_step": global_step,
+                    })
+
+    @rank_zero_only
+    def log_video(self, pl_module, batch, batch_idx, split="val"):
+        if callable(getattr(pl_module, "log_videos", None)) and self.max_videos > 0:
+            is_train = pl_module.training
+            if is_train:
+                pl_module.eval()
+
+            amp_context = (
+                pl_module.trainer.precision_plugin.forward_context()
+                if self.enable_autocast else nullcontext()
+            )
+            with torch.no_grad(), amp_context:
+                videos = pl_module.log_videos(
+                    batch, split=split, **self.log_videos_kwargs
+                )
+
+            for key, video in videos.items():
+                video = video[:self.max_videos].detach()
+                video = video.to(device="cpu", dtype=torch.float32)
+                video = video.permute(0, 2, 1, 3, 4)  # BCTHW -> BTCHW
+                if self.clamp:
+                    video = video.clamp(-1.0, 1.0)
+                videos[key] = video
+
+            self.log_local(
+                pl_module.logger.save_dir,
+                split,
+                videos,
+                pl_module.global_step,
+                pl_module.current_epoch,
+                batch_idx,
+                pl_module=pl_module
+                if isinstance(pl_module.logger, WandbLogger)
+                else None,
+            )
+
+            if is_train:
+                pl_module.train()
+
+    @rank_zero_only
+    def on_validation_batch_end(
+        self, trainer, pl_module, outputs, batch, batch_idx, *args, **kwargs
+    ):
+        if (
+            not self.disabled and not trainer.sanity_checking
+            and pl_module.global_step > 0 and batch_idx == 0
+        ):
+            self.log_video(pl_module, batch, batch_idx, split="val")
+
+
 @rank_zero_only
 def init_wandb(save_dir, opt, config, group_name, name_str):
     print(f"setting WANDB_DIR to {save_dir}")
@@ -763,10 +878,6 @@ if __name__ == "__main__":
                     "debug": opt.debug,
                     "ckpt_name": melk_ckpt_name,
                 },
-            },
-            "image_logger": {
-                "target": "main.ImageLogger",
-                "params": {"batch_frequency": 1000, "max_images": 4, "clamp": True},
             },
             "learning_rate_logger": {
                 "target": "pytorch_lightning.callbacks.LearningRateMonitor",

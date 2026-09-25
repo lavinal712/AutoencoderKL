@@ -53,14 +53,14 @@ data:
       root_dir: /path/to/ImageNet
       transform_config:
         image_transforms:
-          - target: torchvision.transforms.Resize
+          - target: torchvision.transforms.v2.Resize
             params:
               size: 256
               antialias: true
-          - target: torchvision.transforms.RandomCrop
+          - target: torchvision.transforms.v2.RandomCrop
             params:
               size: 256
-          - target: torchvision.transforms.RandomHorizontalFlip
+          - target: torchvision.transforms.v2.RandomHorizontalFlip
             params:
               p: 0.5
 
