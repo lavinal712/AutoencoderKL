@@ -43,7 +43,6 @@ class COCOLoader(pl.LightningDataModule):
         batch_size: int,
         train: DictConfig = None,
         validation: Optional[DictConfig] = None,
-        test: Optional[DictConfig] = None,
         num_workers: int = 0,
         prefetch_factor: int = 2,
         shuffle: bool = False,
@@ -65,18 +64,20 @@ class COCOLoader(pl.LightningDataModule):
             split="train",
             transform=build_transform(**train_transform_config),
         )
-        val_transform_config = validation.get("transform_config") or dict()
-        self.val_dataset = COCODataset(
-            root_dir=validation.root_dir,
-            split="val",
-            transform=build_transform(**val_transform_config),
-        )
-        test_transform_config = test.get("transform_config") or dict()
-        self.test_dataset = COCODataset(
-            root_dir=test.root_dir,
-            split="test",
-            transform=build_transform(**test_transform_config),
-        )
+        if validation is not None:
+            val_transform_config = validation.get("transform_config") or dict()
+            self.test_dataset = COCODataset(
+                root_dir=validation.root_dir,
+                split="val",
+                transform=build_transform(**val_transform_config),
+            )
+        else:
+            print("Warning: No Validation Dataset defined, using that one from training")
+            self.test_dataset = COCODataset(
+                root_dir=train.root_dir,
+                split="train",
+                transform=build_transform(),
+            )
 
     def prepare_data(self):
         pass
@@ -103,7 +104,7 @@ class COCOLoader(pl.LightningDataModule):
 
     def val_dataloader(self):
         return DataLoader(
-            self.val_dataset,
+            self.test_dataset,
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
