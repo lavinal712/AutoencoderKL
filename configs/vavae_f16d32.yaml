@@ -48,6 +48,8 @@ data:
     num_workers: 4
     prefetch_factor: 2
     shuffle: true
+    drop_last: true
+    pin_memory: true
 
     train:
       root_dir: /path/to/ImageNet

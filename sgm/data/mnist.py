@@ -27,7 +27,7 @@ class MNISTLoader(pl.LightningDataModule):
 
         self.batch_size = batch_size
         self.num_workers = num_workers
-        self.prefetch_factor = prefetch_factor if num_workers > 0 else 0
+        self.prefetch_factor = prefetch_factor if num_workers > 0 else None
         self.shuffle = shuffle
         self.train_dataset = MNISTDataDictWrapper(
             torchvision.datasets.MNIST(
@@ -56,7 +56,7 @@ class MNISTLoader(pl.LightningDataModule):
         return DataLoader(
             self.test_dataset,
             batch_size=self.batch_size,
-            shuffle=self.shuffle,
+            shuffle=False,
             num_workers=self.num_workers,
             prefetch_factor=self.prefetch_factor,
         )
@@ -65,7 +65,7 @@ class MNISTLoader(pl.LightningDataModule):
         return DataLoader(
             self.test_dataset,
             batch_size=self.batch_size,
-            shuffle=self.shuffle,
+            shuffle=False,
             num_workers=self.num_workers,
             prefetch_factor=self.prefetch_factor,
         )
