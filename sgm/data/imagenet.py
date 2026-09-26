@@ -42,6 +42,8 @@ class ImageNetLoader(pl.LightningDataModule):
         prefetch_factor: int = 2,
         shuffle: bool = False,
         drop_last: bool = False,
+        pin_memory: bool = False,
+        persistent_workers: bool = False,
     ):
         super().__init__()
 
@@ -50,6 +52,8 @@ class ImageNetLoader(pl.LightningDataModule):
         self.prefetch_factor = prefetch_factor if self.num_workers > 0 else None
         self.shuffle = shuffle
         self.drop_last = drop_last
+        self.pin_memory = pin_memory
+        self.persistent_workers = persistent_workers and self.num_workers > 0
 
         if train is None:
             raise ValueError("ImageNetLoader requires a train configuration.")
@@ -85,6 +89,8 @@ class ImageNetLoader(pl.LightningDataModule):
             num_workers=self.num_workers,
             prefetch_factor=self.prefetch_factor,
             drop_last=self.drop_last,
+            pin_memory=self.pin_memory,
+            persistent_workers=self.persistent_workers,
         )
 
     def test_dataloader(self):
@@ -95,6 +101,8 @@ class ImageNetLoader(pl.LightningDataModule):
             num_workers=self.num_workers,
             prefetch_factor=self.prefetch_factor,
             drop_last=False,
+            pin_memory=self.pin_memory,
+            persistent_workers=self.persistent_workers,
         )
 
     def val_dataloader(self):
@@ -105,4 +113,6 @@ class ImageNetLoader(pl.LightningDataModule):
             num_workers=self.num_workers,
             prefetch_factor=self.prefetch_factor,
             drop_last=False,
+            pin_memory=self.pin_memory,
+            persistent_workers=self.persistent_workers,
         )
