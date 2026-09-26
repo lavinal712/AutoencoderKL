@@ -2,6 +2,8 @@ diffusers==0.33.0
 einops==0.8.0
 fsspec==2025.2.0
 huggingface-hub==0.33.0
+imageio==2.37.4
+imageio-ffmpeg==0.6.0
 kornia==0.7.4
 matplotlib==3.7.0
 natsort==8.4.0

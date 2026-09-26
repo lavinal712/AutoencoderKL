@@ -187,7 +187,7 @@ def get_parser(**parser_kwargs):
         nargs="?",
         const=True,
         default=True,  # TODO: later default to True
-        help="log to wandb",
+        help="exclude the base config name from the run",
     )
     if version.parse(torch.__version__) >= version.parse("2.0.0"):
         parser.add_argument(

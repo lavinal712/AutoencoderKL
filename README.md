@@ -71,7 +71,6 @@ torchrun --nproc_per_node=${NUM_GPUS} --nnodes=${NUM_NODES} main.py \
     --base configs/autoencoder_kl_32x32x4.yaml \
     --train False \
     --resume logs/autoencoder_kl_32x32x4 \
-    --base configs/autoencoder_kl_32x32x4.yaml \
     --logdir eval/autoencoder_kl_32x32x4 \
 ```
 
