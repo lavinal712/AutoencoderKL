@@ -141,7 +141,7 @@ def get_parser(**parser_kwargs):
         "--logdir",
         type=str,
         default="logs",
-        help="directory for logging dat shit",
+        help="directory for logging data",
     )
     parser.add_argument(
         "--scale_lr",

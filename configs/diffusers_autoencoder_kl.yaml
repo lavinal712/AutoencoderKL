@@ -1,29 +1,18 @@
 model:
-  base_learning_rate: 1.0e-4
-  target: sgm.models.autoencoder.AutoencoderKL
+  base_learning_rate: 1.0e-5
+  target: sgm.models.diffusers_autoencoder.DiffusersAutoencoderKLWrapper
   params:
     input_key: jpg
     monitor: "val/loss/rec"
     disc_start_iter: 50001
-    embed_dim: 4
-
-    ddconfig:
-      attn_type: vanilla-xformers
-      double_z: true
-      z_channels: 4
-      resolution: 256
-      in_channels: 3
-      out_ch: 3
-      ch: 128
-      ch_mult: [1, 2, 4, 4]
-      num_res_blocks: 2
-      attn_resolutions: []
-      dropout: 0.0
+    pretrained_model_name_or_path: stabilityai/sd-vae-ft-mse
+    trainable_ae_params:
+      - ["decoder", "post_quant_conv"]
 
     lossconfig:
       target: sgm.modules.autoencoding.losses.GeneralLPIPSWithDiscriminator
       params:
-        perceptual_weight: 1.0
+        perceptual_weight: 0.25
         disc_start: 50001
         disc_weight: 0.5
         learn_logvar: false
@@ -72,9 +61,13 @@ lightning:
       every_n_epochs: 1
 
   callbacks:
-    metrics_over_trainsteps_checkpoint:
+    save_diffusers:
+      target: sgm.callback.SaveDiffusersCallback
       params:
-        every_n_train_steps: 50000
+        save_dir: diffusers
+        every_n_epochs: 1
+        export_on_train_end: true
+        safe_serialization: true
 
     image_logger:
       target: main.ImageLogger
