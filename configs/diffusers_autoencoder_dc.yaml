@@ -1,35 +1,21 @@
 model:
-  base_learning_rate: 1.0e-4
-  target: sgm.models.autoencoder.AutoencoderKL
+  base_learning_rate: 1.0e-5
+  target: sgm.models.diffusers_autoencoder.DiffusersAutoencoderDCWrapper
   params:
     input_key: jpg
     monitor: "val/loss/rec"
     disc_start_iter: 50001
-    embed_dim: 4
-
-    ddconfig:
-      attn_type: vanilla-xformers
-      double_z: true
-      z_channels: 4
-      resolution: 256
-      in_channels: 3
-      out_ch: 3
-      ch: 128
-      ch_mult: [1, 2, 4, 4]
-      num_res_blocks: 2
-      attn_resolutions: []
-      dropout: 0.0
+    pretrained_model_name_or_path: mit-han-lab/dc-ae-f32c32-sana-1.0-diffusers
+    trainable_ae_params:
+      - ["decoder"]
 
     lossconfig:
       target: sgm.modules.autoencoding.losses.GeneralLPIPSWithDiscriminator
       params:
-        perceptual_weight: 1.0
+        perceptual_weight: 0.25
         disc_start: 50001
         disc_weight: 0.5
         learn_logvar: false
-
-        regularization_weights:
-          kl_loss: 1.0e-6
 
 data:
   target: sgm.data.imagenet.ImageNetLoader
@@ -72,9 +58,13 @@ lightning:
       every_n_epochs: 1
 
   callbacks:
-    metrics_over_trainsteps_checkpoint:
+    save_diffusers:
+      target: sgm.callback.SaveDiffusersCallback
       params:
-        every_n_train_steps: 50000
+        save_dir: diffusers
+        every_n_epochs: 1
+        export_on_train_end: true
+        safe_serialization: true
 
     image_logger:
       target: main.ImageLogger

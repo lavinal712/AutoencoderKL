@@ -1,40 +1,31 @@
 model:
-  base_learning_rate: 1.0e-4
-  target: sgm.models.autoencoder.AutoencoderKL
+  base_learning_rate: 1.0e-5
+  target: sgm.models.diffusers_autoencoder.DiffusersAutoencoderKLWanWrapper
   params:
-    input_key: jpg
+    input_key: mp4
     monitor: "val/loss/rec"
     disc_start_iter: 50001
-    embed_dim: 4
-
-    ddconfig:
-      attn_type: vanilla-xformers
-      double_z: true
-      z_channels: 4
-      resolution: 256
-      in_channels: 3
-      out_ch: 3
-      ch: 128
-      ch_mult: [1, 2, 4, 4]
-      num_res_blocks: 2
-      attn_resolutions: []
-      dropout: 0.0
+    pretrained_model_name_or_path: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    subfolder: vae
+    trainable_ae_params:
+      - ["decoder", "post_quant_conv"]
 
     lossconfig:
       target: sgm.modules.autoencoding.losses.GeneralLPIPSWithDiscriminator
       params:
-        perceptual_weight: 1.0
+        perceptual_weight: 0.25
         disc_start: 50001
         disc_weight: 0.5
+        dims: 3
         learn_logvar: false
 
         regularization_weights:
           kl_loss: 1.0e-6
 
 data:
-  target: sgm.data.imagenet.ImageNetLoader
+  target: sgm.data.ucf101.UCF101Loader
   params:
-    batch_size: 24
+    batch_size: 4
     num_workers: 4
     prefetch_factor: 2
     shuffle: true
@@ -42,24 +33,28 @@ data:
     pin_memory: true
 
     train:
-      root_dir: /path/to/ImageNet
+      root_dir: /path/to/UCF101
+      frames_per_clip: 17
+      step_between_clips: 17
       transform_config:
         image_transforms:
           - target: torchvision.transforms.v2.Resize
             params:
-              size: 256
+              size: 128
               antialias: true
           - target: torchvision.transforms.v2.RandomCrop
             params:
-              size: 256
+              size: 128
           - target: torchvision.transforms.v2.RandomHorizontalFlip
             params:
               p: 0.5
 
-    validation:
-      root_dir: /path/to/ImageNet
+    test:
+      root_dir: /path/to/UCF101
+      frames_per_clip: 17
+      step_between_clips: 17
       transform_config:
-        size: 256
+        size: 128
 
 lightning:
   strategy:
@@ -72,17 +67,20 @@ lightning:
       every_n_epochs: 1
 
   callbacks:
-    metrics_over_trainsteps_checkpoint:
+    save_diffusers:
+      target: sgm.callback.SaveDiffusersCallback
       params:
-        every_n_train_steps: 50000
+        save_dir: diffusers
+        every_n_epochs: 1
+        export_on_train_end: true
+        safe_serialization: true
 
-    image_logger:
-      target: main.ImageLogger
+    video_logger:
+      target: main.VideoLogger
       params:
-        enable_autocast: False
-        batch_frequency: 1000
-        max_images: 8
-        increase_log_steps: True
+        max_videos: 4
+        fps: 8
+        enable_autocast: false
 
   trainer:
     precision: 32-true
