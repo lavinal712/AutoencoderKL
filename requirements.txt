@@ -1,3 +1,4 @@
+av==18.1.0
 diffusers==0.39.0
 einops==0.8.2
 fsspec==2025.2.0
@@ -25,4 +26,5 @@ torch-fidelity==0.4.0
 transformers==4.57.6
 tqdm
 wandb
+webdataset
 xformers==0.0.35
