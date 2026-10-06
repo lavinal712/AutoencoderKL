@@ -1,47 +1,33 @@
 model:
   base_learning_rate: 1.0e-5
-  target: sgm.models.autoencoder.AutoencodingEngine
+  target: sgm.models.diffusers_autoencoder.DiffusersAutoencoderRAEWrapper
   params:
     input_key: jpg
     monitor: "val/loss/rec"
     disc_start_iter: 50001
-    ckpt_path: checkpoints/ae.safetensors
+    pretrained_model_name_or_path: nyu-visionx/RAE-dinov2-wReg-base-ViTXL-n08
+    freeze_encoder: true
+    noise_tau: 0.8
     trainable_ae_params:
       - ["decoder"]
-
-    encoder_config:
-      target: sgm.modules.diffusionmodules.model.Encoder
-      params:
-        attn_type: vanilla-xformers
-        double_z: true
-        z_channels: 16
-        resolution: 256
-        in_channels: 3
-        out_ch: 3
-        ch: 128
-        ch_mult: [1, 2, 4, 4]
-        num_res_blocks: 2
-        attn_resolutions: []
-        dropout: 0.0
-
-    decoder_config:
-      target: sgm.modules.diffusionmodules.model.Decoder
-      params: ${model.params.encoder_config.params}
-
-    regularizer_config:
-      target: sgm.modules.autoencoding.regularizers.DiagonalGaussianRegularizer
 
     loss_config:
       target: sgm.modules.autoencoding.losses.GeneralLPIPSWithDiscriminator
       params:
         perceptual_weight: 0.25
         disc_start: 50001
-        disc_weight: 0.0
+        disc_ramp: 20000
+        disc_weight: 0.5
         learn_logvar: false
-        pixel_loss: l2
 
-        regularization_weights:
-          kl_loss: 1.0
+        discriminator_config:
+         target: sgm.modules.autoencoding.discriminators.dino.DinoDiscriminator
+         params:
+          dino_ckpt_path: checkpoints/dino_vit_small_patch8_224.pth
+          ks: 9
+          norm_type: bn
+          using_spec_norm: True
+          recipe: S_8
 
 data:
   target: sgm.data.imagenet.ImageNetLoader
@@ -84,9 +70,13 @@ lightning:
       every_n_epochs: 1
 
   callbacks:
-    metrics_over_trainsteps_checkpoint:
+    save_diffusers:
+      target: sgm.callback.SaveDiffusersCallback
       params:
-        every_n_train_steps: 50000
+        save_dir: diffusers
+        every_n_epochs: 1
+        export_on_train_end: true
+        safe_serialization: true
 
     image_logger:
       target: main.ImageLogger

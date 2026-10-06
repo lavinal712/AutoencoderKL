@@ -12,13 +12,19 @@ from matplotlib import pyplot as plt
 
 from ....util import default, instantiate_from_config
 from ..lpips.loss.lpips import LPIPS
-from ..lpips.vqperceptual import hinge_d_loss, vanilla_d_loss
+from ..lpips.vqperceptual import (
+    hinge_d_loss,
+    vanilla_d_loss,
+    hinge_g_loss,
+    non_saturating_g_loss,
+)
 
 
 class GeneralLPIPSWithDiscriminator(nn.Module):
     def __init__(
         self,
         disc_start: int,
+        disc_ramp: int = 0,
         logvar_init: float = 0.0,
         disc_num_layers: int = 3,
         disc_in_channels: int = 3,
@@ -27,6 +33,7 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
         perceptual_weight: float = 1.0,
         pixel_loss: str = "l1",
         disc_loss: str = "hinge",
+        gen_loss: str = "hinge",
         scale_input_to_tgt_size: bool = False,
         dims: int = 2,
         learn_logvar: bool = False,
@@ -46,6 +53,7 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
         self.scale_input_to_tgt_size = scale_input_to_tgt_size
         assert pixel_loss in ["l1", "l2"]
         assert disc_loss in ["hinge", "vanilla"]
+        assert gen_loss in ["hinge", "non_saturating"]
         if pixel_loss == "l1":
             self.pixel_loss = lambda x, y: F.l1_loss(x, y, reduction="none")
         else:
@@ -74,10 +82,12 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
 
         self.discriminator = instantiate_from_config(discriminator_config)
         self.discriminator_iter_start = disc_start
+        self.disc_ramp = disc_ramp
         self.disc_loss = hinge_d_loss if disc_loss == "hinge" else vanilla_d_loss
         self.disc_factor = disc_factor
         self.discriminator_weight = disc_weight
         self.regularization_weights = default(regularization_weights, {})
+        self.gen_loss = hinge_g_loss if gen_loss == "hinge" else non_saturating_g_loss
 
         self.forward_keys = [
             "optimizer_idx",
@@ -263,7 +273,7 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
             # generator update
             if global_step >= self.discriminator_iter_start or not self.training:
                 logits_fake = self.discriminator(reconstructions.contiguous())
-                g_loss = -torch.mean(logits_fake)
+                g_loss = self.gen_loss(logits_fake)
                 if self.training:
                     d_weight = self.calculate_adaptive_weight(
                         nll_loss, g_loss, last_layer=last_layer
@@ -274,7 +284,18 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
                 d_weight = torch.tensor(0.0, device=inputs.device)
                 g_loss = torch.tensor(0.0, requires_grad=True, device=inputs.device)
 
-            loss = weighted_nll_loss + d_weight * self.disc_factor * g_loss
+            disc_factor = self.disc_factor
+            if self.training:
+                if global_step < self.discriminator_iter_start:
+                    disc_factor = 0.0
+                elif self.disc_ramp > 0:
+                    progress = min(
+                        (global_step - self.discriminator_iter_start + 1) / self.disc_ramp, 1.0
+                    )
+                    disc_factor = self.disc_factor * progress
+            disc_factor = torch.tensor(disc_factor, device=inputs.device)
+
+            loss = weighted_nll_loss + d_weight * disc_factor * g_loss
             log = dict()
             for k in regularization_log:
                 if k in self.regularization_weights:
@@ -290,6 +311,7 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
                     f"{split}/loss/g": g_loss.mean(),
                     f"{split}/scalars/logvar": self.logvar.mean(),
                     f"{split}/scalars/d_weight": d_weight.mean(),
+                    f"{split}/scalars/disc_factor": disc_factor.mean(),
                 }
             )
             if self.perceptual_weight > 0:

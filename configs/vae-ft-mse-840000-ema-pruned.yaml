@@ -31,6 +31,7 @@ model:
         disc_weight: 0.0
         learn_logvar: false
         pixel_loss: l2
+
         regularization_weights:
           kl_loss: 1.0e-6
 

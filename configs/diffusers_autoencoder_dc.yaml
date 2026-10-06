@@ -9,7 +9,7 @@ model:
     trainable_ae_params:
       - ["decoder"]
 
-    lossconfig:
+    loss_config:
       target: sgm.modules.autoencoding.losses.GeneralLPIPSWithDiscriminator
       params:
         perceptual_weight: 0.25

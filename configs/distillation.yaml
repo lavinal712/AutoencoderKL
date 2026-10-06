@@ -29,6 +29,7 @@ model:
         pixel_loss: l1
         perceptual_weight: 0.25
         disc_start: 50001
+        disc_ramp: 20000
         disc_weight: 1.0
 
 data:

@@ -32,7 +32,7 @@ To get a local copy up and running follow these simple example steps.
 ```bash
 git clone https://github.com/lavinal712/AutoencoderKL.git
 cd AutoencoderKL
-conda create -n autoencoderkl python=3.10 -y
+conda create -n autoencoderkl python=3.12 -y
 conda activate autoencoderkl
 pip install -r requirements.txt
 ```
