@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from diffusers import AutoencoderDC as DiffusersAutoencoderDC
 from diffusers import AutoencoderKL as DiffusersAutoencoderKL
+from diffusers import AutoencoderKLQwenImage as DiffusersAutoencoderKLQwenImage
 from diffusers import AutoencoderKLWan as DiffusersAutoencoderKLWan
 from diffusers import AutoencoderRAE as DiffusersAutoencoderRAE
 from omegaconf import OmegaConf
@@ -285,7 +286,7 @@ class DiffusersAutoencoderKLWanWrapper(AutoencodingEngine):
         self.clear_cache()
         return out
 
-    def decode(self, z, **kwargs):
+    def decode(self, z: torch.Tensor, **kwargs):
         return self._decode(z)
 
     def get_last_layer(self):
@@ -542,4 +543,176 @@ class DiffusersAutoencoderRAEWrapper(AutoencodingEngine):
         state = {k: sd[k].detach().cpu() for k in rae.state_dict() if k in sd}
         missing, unexpected = rae.load_state_dict(state, strict=False)
         rae.save_pretrained(save_dir, safe_serialization=safe_serialization)
+        return missing, unexpected
+
+
+class DiffusersAutoencoderKLQwenImageWrapper(AutoencodingEngine):
+    def __init__(
+        self,
+        pretrained_model_name_or_path: Optional[str] = None,
+        model_config_name_or_path: Optional[str] = None,
+        subfolder: Optional[str] = None,
+        regularizer_config: Optional[Dict] = None,
+        **kwargs,
+    ):
+        if "lossconfig" in kwargs:
+            kwargs["loss_config"] = kwargs.pop("lossconfig")
+
+        assert pretrained_model_name_or_path or model_config_name_or_path
+        if pretrained_model_name_or_path is not None:
+            vae = DiffusersAutoencoderKLQwenImage.from_pretrained(
+                pretrained_model_name_or_path, subfolder=subfolder
+            )
+        else:
+            config = DiffusersAutoencoderKLQwenImage.load_config(
+                model_config_name_or_path
+            )
+            vae = DiffusersAutoencoderKLQwenImage.from_config(config)
+        self.config = OmegaConf.to_container(
+            OmegaConf.create(dict(vae.config)), resolve=True
+        )
+
+        super().__init__(
+            encoder_config={"target": "torch.nn.Identity"},
+            decoder_config={"target": "torch.nn.Identity"},
+            regularizer_config=regularizer_config or {
+                "target": (
+                    "sgm.modules.autoencoding.regularizers"
+                    ".DiagonalGaussianRegularizer"
+                )
+            },
+            **kwargs,
+        )
+
+        self.encoder = vae.encoder
+        self.decoder = vae.decoder
+        self.quant_conv = vae.quant_conv
+        self.post_quant_conv = vae.post_quant_conv
+
+        # Precompute and cache conv counts for encoder and decoder for clear_cache speedup
+        self._cached_conv_counts = {
+            "decoder": sum(isinstance(m, nn.Conv3d) for m in self.decoder.modules())
+            if self.decoder is not None
+            else 0,
+            "encoder": sum(isinstance(m, nn.Conv3d) for m in self.encoder.modules())
+            if self.encoder is not None
+            else 0,
+        }
+
+        if self.use_ema:
+            self.model_ema = LitEma(self, decay=self.ema_decay)
+
+    def clear_cache(self):
+        # Use cached conv counts for decoder and encoder to avoid re-iterating modules each call
+        self._conv_num = self._cached_conv_counts["decoder"]
+        self._conv_idx = [0]
+        self._feat_map = [None] * self._conv_num
+        # cache encode
+        self._enc_conv_num = self._cached_conv_counts["encoder"]
+        self._enc_conv_idx = [0]
+        self._enc_feat_map = [None] * self._enc_conv_num
+
+    def _encode(self, x: torch.Tensor) -> torch.Tensor:
+        self.clear_cache()
+        t = x.shape[2]
+        iter_ = 1 + (t - 1) // 4
+        for i in range(iter_):
+            self._enc_conv_idx = [0]
+            if i == 0:
+                out = self.encoder(
+                    x[:, :, :1, :, :],
+                    feat_cache=self._enc_feat_map,
+                    feat_idx=self._enc_conv_idx,
+                )
+            else:
+                out_ = self.encoder(
+                    x[:, :, 1 + 4 * (i - 1) : 1 + 4 * i, :, :],
+                    feat_cache=self._enc_feat_map,
+                    feat_idx=self._enc_conv_idx,
+                )
+                out = torch.cat([out, out_], 2)
+        out = self.quant_conv(out)
+        self.clear_cache()
+        return out
+
+    def encode(
+        self,
+        x: torch.Tensor,
+        return_reg_log: bool = False,
+        unregularized: bool = False,
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, dict]]:
+        squeeze_temporal = x.dim() == 4
+        if squeeze_temporal:
+            x = x.unsqueeze(2)
+        z = self._encode(x)
+        if unregularized:
+            if squeeze_temporal:
+                z = z.squeeze(2)
+            return z, dict()
+        z, reg_log = self.regularization(z)
+        if squeeze_temporal:
+            z = z.squeeze(2)
+        if return_reg_log:
+            return z, reg_log
+        return z
+
+    def _decode(self, z: torch.Tensor) -> torch.Tensor:
+        self.clear_cache()
+        iter_ = z.shape[2]
+        x = self.post_quant_conv(z)
+        out = None
+        for i in range(iter_):
+            self._conv_idx = [0]
+            if i == 0:
+                out = self.decoder(
+                    x[:, :, i : i + 1],
+                    feat_cache=self._feat_map,
+                    feat_idx=self._conv_idx,
+                )
+            else:
+                out_ = self.decoder(
+                    x[:, :, i : i + 1],
+                    feat_cache=self._feat_map,
+                    feat_idx=self._conv_idx,
+                )
+                out = torch.cat([out, out_], dim=2)
+        out = torch.clamp(out, min=-1.0, max=1.0)
+        self.clear_cache()
+        return out
+
+    def decode(self, z: torch.Tensor, **kwargs) -> torch.Tensor:
+        squeeze_temporal = z.dim() == 4
+        if squeeze_temporal:
+            z = z.unsqueeze(2)
+        out = self._decode(z)
+        if squeeze_temporal:
+            out = out.squeeze(2)
+        return out
+
+    def get_last_layer(self):
+        return self.decoder.conv_out.weight
+
+    def get_encoder_last_layer(self):
+        return self.encoder.conv_out.weight
+
+    def get_autoencoder_params(self):
+        params = list(super().get_autoencoder_params())
+        for m in (self.quant_conv, self.post_quant_conv):
+            if m is not None:
+                params += list(m.parameters())
+        return params
+
+    def train(self, mode: bool = True):
+        super().train(mode)
+        if hasattr(self.regularization, "sample"):
+            self.regularization.sample = mode
+        return self
+
+    @torch.no_grad()
+    def save_pretrained(self, save_dir, safe_serialization=True):
+        vae = DiffusersAutoencoderKLQwenImage.from_config(self.config)
+        sd = self.state_dict()
+        state = {k: sd[k].detach().cpu() for k in vae.state_dict() if k in sd}
+        missing, unexpected = vae.load_state_dict(state, strict=False)
+        vae.save_pretrained(save_dir, safe_serialization=safe_serialization)
         return missing, unexpected

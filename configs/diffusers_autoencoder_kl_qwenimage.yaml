@@ -1,11 +1,11 @@
 model:
   base_learning_rate: 1.0e-5
-  target: sgm.models.diffusers_autoencoder.DiffusersAutoencoderKLWanWrapper
+  target: sgm.models.diffusers_autoencoder.DiffusersAutoencoderKLQwenImageWrapper
   params:
-    input_key: mp4
+    input_key: jpg
     monitor: "val/loss/rec"
     disc_start_iter: 50001
-    pretrained_model_name_or_path: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    pretrained_model_name_or_path: Qwen/Qwen-Image
     subfolder: vae
     trainable_ae_params:
       - ["decoder", "post_quant_conv"]
@@ -17,16 +17,15 @@ model:
         disc_start: 50001
         disc_ramp: 20000
         disc_weight: 0.5
-        dims: 3
         learn_logvar: false
 
         regularization_weights:
           kl_loss: 1.0e-6
 
 data:
-  target: sgm.data.ucf101.UCF101Loader
+  target: sgm.data.imagenet.ImageNetLoader
   params:
-    batch_size: 4
+    batch_size: 24
     num_workers: 4
     prefetch_factor: 2
     shuffle: true
@@ -34,28 +33,24 @@ data:
     pin_memory: true
 
     train:
-      root_dir: /path/to/UCF101
-      frames_per_clip: 17
-      step_between_clips: 17
+      root_dir: /path/to/ImageNet
       transform_config:
         image_transforms:
           - target: torchvision.transforms.v2.Resize
             params:
-              size: 128
+              size: 256
               antialias: true
           - target: torchvision.transforms.v2.RandomCrop
             params:
-              size: 128
+              size: 256
           - target: torchvision.transforms.v2.RandomHorizontalFlip
             params:
               p: 0.5
 
-    test:
-      root_dir: /path/to/UCF101
-      frames_per_clip: 17
-      step_between_clips: 17
+    validation:
+      root_dir: /path/to/ImageNet
       transform_config:
-        size: 128
+        size: 256
 
 lightning:
   strategy:
@@ -76,12 +71,13 @@ lightning:
         export_on_train_end: true
         safe_serialization: true
 
-    video_logger:
-      target: main.VideoLogger
+    image_logger:
+      target: main.ImageLogger
       params:
-        max_videos: 4
-        fps: 8
-        enable_autocast: false
+        enable_autocast: False
+        batch_frequency: 1000
+        max_images: 8
+        increase_log_steps: True
 
   trainer:
     precision: 32-true
