@@ -11,6 +11,7 @@ from typing import Any, Union
 import imageio.v2 as imageio
 import numpy as np
 import pytorch_lightning as pl
+import swanlab
 import torch
 import torchvision
 import wandb
@@ -21,9 +22,10 @@ from packaging import version
 from PIL import Image
 from pytorch_lightning import seed_everything
 from pytorch_lightning.callbacks import Callback
-from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.loggers import MLFlowLogger, WandbLogger
 from pytorch_lightning.trainer import Trainer
 from pytorch_lightning.utilities import rank_zero_only
+from swanlab.integration.pytorch_lightning import SwanLabLogger
 
 from sgm.util import exists, instantiate_from_config, isheatmap
 
@@ -174,12 +176,11 @@ def get_parser(**parser_kwargs):
         help="Startuptime from distributed script",
     )
     parser.add_argument(
-        "--wandb",
-        type=str2bool,
-        nargs="?",
-        const=True,
-        default=True,  # TODO: later default to True
-        help="log to wandb",
+        "--logger_backend",
+        type=str.lower,
+        choices=["csv", "wandb", "swanlab", "mlflow"],
+        default="csv",
+        help="Experiment logger backend.",
     )
     parser.add_argument(
         "--no_base_name",
@@ -358,7 +359,6 @@ class ImageLogger(Callback):
                 )
                 plt.colorbar(ax)
                 plt.axis("off")
-
                 filename = "{}_gs-{:06}_e-{:06}_b-{:06}.png".format(
                     k, global_step, current_epoch, batch_idx
                 )
@@ -366,7 +366,6 @@ class ImageLogger(Callback):
                 path = os.path.join(root, filename)
                 plt.savefig(path)
                 plt.close()
-                # TODO: support wandb
             else:
                 grid = torchvision.utils.make_grid(images[k], nrow=4)
                 if self.rescale:
@@ -381,17 +380,24 @@ class ImageLogger(Callback):
                 os.makedirs(os.path.split(path)[0], exist_ok=True)
                 img = Image.fromarray(grid)
                 img.save(path)
-                if exists(pl_module):
-                    assert isinstance(
-                        pl_module.logger, WandbLogger
-                    ), "logger_log_image only supports WandbLogger currently"
+
+            if exists(pl_module):
+                if isinstance(
+                    pl_module.logger, (WandbLogger, SwanLabLogger)
+                ):
                     pl_module.logger.log_image(
                         key=f"{split}/{k}",
-                        images=[
-                            img,
-                        ],
+                        images=[path],
                         step=pl_module.global_step,
                     )
+                elif isinstance(pl_module.logger, MLFlowLogger):
+                    with Image.open(path) as image:
+                        pl_module.logger.experiment.log_image(
+                            pl_module.logger.run_id,
+                            image.copy(),
+                            key=f"{split}/{k}",
+                            step=global_step,
+                        )
 
     @rank_zero_only
     def log_img(self, pl_module, batch, batch_idx, split="train"):
@@ -429,15 +435,13 @@ class ImageLogger(Callback):
                         images[k] = torch.clamp(images[k], -1.0, 1.0)
 
             self.log_local(
-                pl_module.logger.save_dir,
+                pl_module.trainer.logdir,
                 split,
                 images,
                 pl_module.global_step,
                 pl_module.current_epoch,
                 batch_idx,
-                pl_module=pl_module
-                if isinstance(pl_module.logger, WandbLogger)
-                else None,
+                pl_module=pl_module,
             )
 
             if is_train:
@@ -450,13 +454,14 @@ class ImageLogger(Callback):
 
     @rank_zero_only
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
-        if not outputs or "optimizer_idx" not in outputs:
+        if pl_module.global_step == self.step_at_batch_start:
             return
         if not self.disabled and (pl_module.global_step > 0 or self.log_first_step):
             self.log_img(pl_module, batch, batch_idx, split="train")
 
     @rank_zero_only
     def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
+        self.step_at_batch_start = pl_module.global_step
         if (
             not self.disabled and self.log_before_first_step
             and pl_module.global_step == 0 and batch_idx == 0
@@ -531,14 +536,37 @@ class VideoLogger(Callback):
                 ) as writer:
                     for frame in frames:
                         writer.append_data(frame)
+
                 if exists(pl_module):
-                    assert isinstance(
-                        pl_module.logger, WandbLogger
-                    ), "logger_log_video only supports WandbLogger currently"
-                    pl_module.logger.experiment.log({
-                        f"{split}/{key}/video_{sample_idx}": wandb.Video(path, format="mp4"),
-                        "trainer/global_step": global_step,
-                    })
+                    if isinstance(pl_module.logger, WandbLogger):
+                        video = wandb.Video(path, format="mp4")
+                        pl_module.logger.experiment.log({
+                            f"{split}/{key}/video_{sample_idx}": video,
+                            "trainer/global_step": global_step,
+                        })
+                    elif isinstance(pl_module.logger, MLFlowLogger):
+                        pl_module.logger.experiment.log_artifact(
+                            pl_module.logger.run_id,
+                            path,
+                            artifact_path=f"videos/{split}",
+                        )
+                    elif isinstance(pl_module.logger, SwanLabLogger):
+                        gif_path = os.path.splitext(path)[0] + ".gif"
+                        imageio.mimsave(
+                            gif_path,
+                            list(frames),
+                            format="GIF",
+                            duration=1000.0 / self.fps,
+                            loop=0,
+                        )
+                        video = swanlab.Video(gif_path)
+                        pl_module.logger.experiment.log(
+                            {
+                                f"{split}/{key}/video_{sample_idx}": video,
+                                "trainer/global_step": global_step,
+                            },
+                            step=global_step,
+                        )
 
     @rank_zero_only
     def log_video(self, pl_module, batch, batch_idx, split="val"):
@@ -565,15 +593,13 @@ class VideoLogger(Callback):
                 videos[key] = video
 
             self.log_local(
-                pl_module.logger.save_dir,
+                pl_module.trainer.logdir,
                 split,
                 videos,
                 pl_module.global_step,
                 pl_module.current_epoch,
                 batch_idx,
-                pl_module=pl_module
-                if isinstance(pl_module.logger, WandbLogger)
-                else None,
+                pl_module=pl_module,
             )
 
             if is_train:
@@ -590,22 +616,22 @@ class VideoLogger(Callback):
             self.log_video(pl_module, batch, batch_idx, split="val")
 
 
-@rank_zero_only
-def init_wandb(save_dir, opt, config, group_name, name_str):
-    print(f"setting WANDB_DIR to {save_dir}")
-    os.makedirs(save_dir, exist_ok=True)
+# @rank_zero_only
+# def init_wandb(save_dir, opt, config, group_name, name_str):
+#     print(f"setting WANDB_DIR to {save_dir}")
+#     os.makedirs(save_dir, exist_ok=True)
 
-    os.environ["WANDB_DIR"] = save_dir
-    if opt.debug:
-        wandb.init(project=opt.projectname, mode="offline", group=group_name)
-    else:
-        wandb.init(
-            project=opt.projectname,
-            config=config,
-            settings=wandb.Settings(code_dir="./sgm"),
-            group=group_name,
-            name=name_str,
-        )
+#     os.environ["WANDB_DIR"] = save_dir
+#     if opt.debug:
+#         wandb.init(project=opt.projectname, mode="offline", group=group_name)
+#     else:
+#         wandb.init(
+#             project=opt.projectname,
+#             config=config,
+#             settings=wandb.Settings(code_dir="./sgm"),
+#             group=group_name,
+#             name=name_str,
+#         )
 
 
 if __name__ == "__main__":
@@ -785,10 +811,30 @@ if __name__ == "__main__":
                     "name": nowname,
                     "save_dir": logdir,
                     "offline": opt.debug,
-                    "id": nowname,
                     "project": opt.projectname,
                     "log_model": False,
                     # "dir": logdir,
+                },
+            },
+            "swanlab": {
+                "target": "swanlab.integration.pytorch_lightning.SwanLabLogger",
+                "params": {
+                    "project": opt.projectname,
+                    "experiment_name": nowname or "run",
+                    "save_dir": logdir,
+                    "log_dir": os.path.join(logdir, "swanlab"),
+                    "mode": os.environ.get("SWANLAB_MODE", "local"),
+                },
+            },
+            "mlflow": {
+                "target": "pytorch_lightning.loggers.MLFlowLogger",
+                "params": {
+                    "experiment_name": opt.projectname,
+                    "run_name": nowname or "run",
+                    "tracking_uri": os.environ.get(
+                        "MLFLOW_TRACKING_URI", "http://127.0.0.1:5000"
+                    ),
+                    "log_model": False,
                 },
             },
             "csv": {
@@ -799,21 +845,16 @@ if __name__ == "__main__":
                 },
             },
         }
-        default_logger_cfg = default_logger_cfgs["wandb" if opt.wandb else "csv"]
-        if opt.wandb:
+        logger_backend = opt.logger_backend
+        default_logger_cfg = default_logger_cfgs[logger_backend]
+        if opt.logger_backend == "wandb":
             # TODO change once leaving "swiffer" config directory
             try:
                 group_name = nowname.split(now)[-1].split("-")[1]
             except:
                 group_name = nowname
             default_logger_cfg["params"]["group"] = group_name
-            init_wandb(
-                os.path.join(os.getcwd(), logdir),
-                opt=opt,
-                group_name=group_name,
-                config=None,
-                name_str=nowname,
-            )
+            os.makedirs(logdir, exist_ok=True)
         if "logger" in lightning_config:
             logger_cfg = lightning_config.logger
         else:
@@ -1045,7 +1086,9 @@ if __name__ == "__main__":
             os.makedirs(os.path.split(dst)[0], exist_ok=True)
             os.rename(logdir, dst)
 
-        if opt.wandb:
+        if opt.logger_backend == "wandb":
             wandb.finish()
+        elif opt.logger_backend == "swanlab":
+            swanlab.finish()
         # if trainer.global_rank == 0:
         #    print(trainer.profiler.summary())

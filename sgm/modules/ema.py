@@ -13,7 +13,7 @@ class LitEma(nn.Module):
         self.register_buffer(
             "num_updates",
             torch.tensor(0, dtype=torch.int)
-            if use_num_upates
+            if use_num_updates
             else torch.tensor(-1, dtype=torch.int),
         )
 

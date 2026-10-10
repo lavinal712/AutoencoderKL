@@ -48,9 +48,6 @@ class AbstractAutoencoder(pl.LightningModule):
             self.automatic_optimization = False
 
     def apply_ckpt(self, ckpt: Union[None, str, dict]):
-        if self.use_ema:
-            self.model_ema = LitEma(self, decay=self.ema_decay)
-
         if ckpt is None:
             return
         if ckpt.endswith("ckpt"):
@@ -68,6 +65,7 @@ class AbstractAutoencoder(pl.LightningModule):
             logpy.info(f"Missing Keys: {missing}")
         if len(unexpected) > 0:
             logpy.info(f"Unexpected Keys: {unexpected}")
+
         if self.use_ema and any(key.startswith("model_ema.") for key in missing):
             self.model_ema = LitEma(self, decay=self.ema_decay)
 
@@ -175,6 +173,9 @@ class AutoencodingEngine(AbstractAutoencoder):
             assert len(self.disc_optimizer_args) == len(self.trainable_disc_params)
         else:
             self.disc_optimizer_args = [{}]  # makes type consistent
+
+        if self.use_ema:
+            self.model_ema = LitEma(self, decay=self.ema_decay)
 
         if ckpt_path is not None:
             assert ckpt_engine is None, "Can't set ckpt_engine and ckpt_path"
@@ -335,9 +336,6 @@ class AutoencodingEngine(AbstractAutoencoder):
 
         if self.use_ema and optimizer_idx == 0:
             self.model_ema(self)
-
-        # return after optimizer update
-        return {"optimizer_idx": optimizer_idx}
 
     def on_validation_epoch_start(self) -> None:
         self.val_metrics = self.build_metrics("val/metrics/")
@@ -679,6 +677,9 @@ class AutoencodingEngineLegacy(AutoencodingEngine):
         )
         self.post_quant_conv = torch.nn.Conv2d(embed_dim, ddconfig["z_channels"], 1)
         self.embed_dim = embed_dim
+
+        if self.use_ema:
+            self.model_ema = LitEma(self, decay=self.ema_decay)
 
         self.apply_ckpt(default(ckpt_path, ckpt_engine))
 

@@ -56,7 +56,6 @@ torchrun --nproc_per_node=${NUM_GPUS} --nnodes=${NUM_NODES} main.py \
     --train \
     --logdir logs/autoencoder_kl_32x32x4 \
     --scale_lr False \
-    --wandb False \
 ```
 
 ### Evaluation
