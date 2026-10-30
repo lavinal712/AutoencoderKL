@@ -239,6 +239,12 @@ class AutoencodingEngine(AbstractAutoencoder):
         dec = self.decode(z, **additional_decode_kwargs)
         return z, dec, reg_log
 
+    def train(self, mode: bool = True):
+        super().train(mode)
+        if hasattr(self.regularization, "sample"):
+            self.regularization.sample = mode
+        return self
+
     def inner_training_step(
         self, batch: dict, batch_idx: int, optimizer_idx: int = 0
     ) -> torch.Tensor:

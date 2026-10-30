@@ -1,0 +1,89 @@
+model:
+  base_learning_rate: 1.0e-5
+  target: sgm.models.diffusers_autoencoder.DiffusersAutoencoderKLFlux2Wrapper
+  params:
+    input_key: jpg
+    monitor: "val/loss/rec"
+    disc_start_iter: 50001
+    pretrained_model_name_or_path: black-forest-labs/FLUX.2-dev
+    subfolder: vae
+    trainable_ae_params:
+      - ["decoder", "post_quant_conv"]
+
+    loss_config:
+      target: sgm.modules.autoencoding.losses.GeneralLPIPSWithDiscriminator
+      params:
+        perceptual_weight: 0.25
+        disc_start: 50001
+        disc_ramp: 20000
+        disc_weight: 0.5
+        learn_logvar: false
+
+        regularization_weights:
+          kl_loss: 1.0e-6
+
+data:
+  target: sgm.data.imagenet.ImageNetLoader
+  params:
+    batch_size: 24
+    num_workers: 4
+    prefetch_factor: 2
+    shuffle: true
+    drop_last: true
+    pin_memory: true
+
+    train:
+      root_dir: /path/to/ImageNet
+      transform_config:
+        image_transforms:
+          - target: torchvision.transforms.v2.Resize
+            params:
+              size: 256
+              antialias: true
+          - target: torchvision.transforms.v2.RandomCrop
+            params:
+              size: 256
+          - target: torchvision.transforms.v2.RandomHorizontalFlip
+            params:
+              p: 0.5
+
+    validation:
+      root_dir: /path/to/ImageNet
+      transform_config:
+        size: 256
+
+lightning:
+  strategy:
+    target: pytorch_lightning.strategies.DDPStrategy
+    params:
+      find_unused_parameters: True
+
+  modelcheckpoint:
+    params:
+      every_n_epochs: 1
+
+  callbacks:
+    save_diffusers:
+      target: sgm.callback.SaveDiffusersCallback
+      params:
+        save_dir: diffusers
+        every_n_epochs: 1
+        export_on_train_end: true
+        safe_serialization: true
+
+    image_logger:
+      target: main.ImageLogger
+      params:
+        enable_autocast: False
+        batch_frequency: 1000
+        max_images: 8
+        increase_log_steps: True
+
+  trainer:
+    precision: 32-true
+    devices: 0, 1, 2, 3
+    limit_val_batches: 50
+    benchmark: True
+    accumulate_grad_batches: 1
+    check_val_every_n_epoch: 1
+    max_epochs: 100
